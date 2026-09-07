@@ -13,6 +13,7 @@ from app.domain.creator.models import (
 from app.schemas.creator import (
     AudienceProfileRead,
     CreatorCreate,
+    CreatorCreateResponse,
     CreatorGoalRead,
     CreatorProfileRead,
     CreatorRead,
@@ -23,7 +24,7 @@ from app.schemas.creator import (
 router = APIRouter(prefix="/creators", tags=["creators"])
 
 
-@router.post("", response_model=CreatorRead, status_code=201)
+@router.post("", response_model=CreatorCreateResponse, status_code=201)
 async def create_creator(payload: CreatorCreate, db: DbSession) -> Creator:
     """Onboarding entry point (CLAUDE.md 33 Phase 1). Finds or creates the
     owning user by email, then creates a new Creator entity under them.

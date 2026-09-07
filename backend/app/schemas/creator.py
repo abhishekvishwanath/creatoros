@@ -31,6 +31,15 @@ class CreatorRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreatorCreateResponse(CreatorRead):
+    """Onboarding-only response. Surfaces user_id so the frontend can hold onto
+    it as the dev-mode X-Debug-User-Id credential (see app/api/deps.py TODO) —
+    once real Supabase Auth is wired up, the session cookie/JWT replaces this
+    and user_id no longer needs to appear in any API response."""
+
+    user_id: str
+
+
 class CreatorProfileRead(BaseModel):
     bio: Optional[str] = None
     expertise: Optional[list] = None
