@@ -1,24 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
+from app.agent_service.context.builder import build_creator_state_snapshot
+from app.agent_service.model_router.router import get_model_router
+from app.agent_service.orchestrator.orchestrator import Orchestrator
+from app.agent_service.agents.creator_intelligence import CreatorIntelligenceAgent
 from app.api.deps import DbSession, get_owned_creator
-from app.domain.creator.models import (
-    AudienceProfile,
-    Creator,
-    CreatorGoal,
-    CreatorProfile,
-    User,
-    VoiceProfile,
-)
+from app.domain.creator.models import Creator, User
+from app.domain.creator.service import apply_creator_profile_update
 from app.schemas.creator import (
-    AudienceProfileRead,
     CreatorCreate,
     CreatorCreateResponse,
-    CreatorGoalRead,
-    CreatorProfileRead,
     CreatorRead,
     CreatorStateSnapshot,
-    VoiceProfileRead,
 )
 
 router = APIRouter(prefix="/creators", tags=["creators"])
@@ -67,37 +61,42 @@ async def get_creator_state(db: DbSession, creator: Creator = Depends(get_owned_
     to an agent for a task, assembled fresh here from current state rather than
     cached — later phases add recent content / research / experiments / learnings
     once those subsystems exist."""
+    return await build_creator_state_snapshot(db, creator)
 
-    profile_result = await db.execute(
-        select(CreatorProfile)
-        .where(CreatorProfile.creator_id == creator.id, CreatorProfile.is_current.is_(True))
-        .order_by(CreatorProfile.version.desc())
-    )
-    profile = profile_result.scalars().first()
 
-    voice_result = await db.execute(
-        select(VoiceProfile)
-        .where(VoiceProfile.creator_id == creator.id, VoiceProfile.is_current.is_(True))
-        .order_by(VoiceProfile.version.desc())
-    )
-    voice = voice_result.scalars().first()
+@router.post("/{creator_id}/analyze", response_model=CreatorStateSnapshot)
+async def analyze_creator(db: DbSession, creator: Creator = Depends(get_owned_creator)) -> CreatorStateSnapshot:
+    """Runs the Creator Intelligence Agent (CLAUDE.md §11.1) to (re)build this
+    creator's positioning. This is the application-service layer: it invokes
+    the agent service, then applies whatever it proposes through the domain
+    state service — the agent itself never touches the database directly
+    (CLAUDE.md §8.3)."""
+    snapshot = await build_creator_state_snapshot(db, creator)
 
-    audience_result = await db.execute(
-        select(AudienceProfile)
-        .where(AudienceProfile.creator_id == creator.id, AudienceProfile.is_current.is_(True))
-        .order_by(AudienceProfile.version.desc())
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    agent = CreatorIntelligenceAgent()
+    output = await orchestrator.run_agent(
+        agent=agent,
+        creator_id=creator.id,
+        workflow_name="creator_dna_build",
+        context=snapshot,
     )
-    audience = audience_result.scalars().first()
 
-    goals_result = await db.execute(
-        select(CreatorGoal).where(CreatorGoal.creator_id == creator.id, CreatorGoal.status == "active")
-    )
-    goals = list(goals_result.scalars().all())
+    if output.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=output.summary + ("; " + "; ".join(output.warnings) if output.warnings else ""),
+        )
 
-    return CreatorStateSnapshot(
-        creator=CreatorRead.model_validate(creator),
-        positioning=CreatorProfileRead.model_validate(profile) if profile else None,
-        voice=VoiceProfileRead.model_validate(voice) if voice else None,
-        audience=AudienceProfileRead.model_validate(audience) if audience else None,
-        active_goals=[CreatorGoalRead.model_validate(g) for g in goals],
-    )
+    for change in output.proposed_state_changes:
+        if change.get("type") == "creator_profile_upsert":
+            await apply_creator_profile_update(
+                db,
+                creator_id=creator.id,
+                data=change["data"],
+                confidence=output.confidence,
+                evidence_ids=output.evidence_ids,
+            )
+
+    await db.commit()
+    return await build_creator_state_snapshot(db, creator)

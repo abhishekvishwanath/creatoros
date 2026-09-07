@@ -9,7 +9,7 @@ history that produced it (CLAUDE.md 15).
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import generate_id
@@ -61,9 +61,22 @@ class SocialAccount(Base, TimestampMixin, CreatorScopedMixin):
 
 
 class CreatorProfile(Base, TimestampMixin, CreatorScopedMixin):
-    """Identity + positioning + boundaries (CLAUDE.md 7.1, 7.5). Versioned."""
+    """Identity + positioning + boundaries (CLAUDE.md 7.1, 7.5). Versioned.
+
+    At most one row per creator may have is_current=True — enforced at the DB
+    level (not just in application code) so two concurrent analyze/update
+    calls can't both insert a "current" row for the same creator.
+    """
 
     __tablename__ = "creator_profiles"
+    __table_args__ = (
+        Index(
+            "ux_creator_profiles_current",
+            "creator_id",
+            unique=True,
+            postgresql_where=text("is_current"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("creator_profile"))
     version: Mapped[int] = mapped_column(Integer, default=1)

@@ -1,11 +1,15 @@
 "use client";
 
-import { Dna, Mic, Users, Target, Shield } from "lucide-react";
+import { useState } from "react";
+import { Dna, Mic, Users, Target, Shield, Sparkles } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useCreatorState } from "@/lib/use-creator-state";
+import { getSession } from "@/lib/session";
+import { analyzeCreator, ApiError } from "@/lib/api";
 
 function ConfidenceBadge({ confidence }: { confidence: number }) {
   if (confidence >= 0.75) return <Badge tone="good">high confidence</Badge>;
@@ -14,13 +18,39 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
 }
 
 export default function CreatorDnaPage() {
-  const { state, loading } = useCreatorState();
+  const { state, loading, refetch } = useCreatorState();
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+
+  async function handleAnalyze() {
+    const session = getSession();
+    if (!session) return;
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    try {
+      await analyzeCreator(session.creatorId);
+      await refetch();
+    } catch (err) {
+      setAnalyzeError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   return (
     <div>
       <PageHeader
         title="Creator DNA"
         description="What the system has learned about you — inspect and correct it any time."
+        action={
+          <div className="flex flex-col items-end gap-1.5">
+            <Button onClick={handleAnalyze} disabled={analyzing}>
+              <Sparkles className="h-4 w-4" />
+              {analyzing ? "Analyzing…" : state?.positioning ? "Re-analyze" : "Build my Creator DNA"}
+            </Button>
+            {analyzeError && <p className="max-w-xs text-right text-xs text-bad">{analyzeError}</p>}
+          </div>
+        }
       />
       <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-2">
         <Card>

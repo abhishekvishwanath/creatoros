@@ -53,3 +53,7 @@ export function getCreator(creatorId: string) {
 export function getCreatorState(creatorId: string) {
   return request<CreatorStateSnapshot>(`/creators/${creatorId}/state`);
 }
+
+export function analyzeCreator(creatorId: string) {
+  return request<CreatorStateSnapshot>(`/creators/${creatorId}/analyze`, { method: "POST" });
+}
