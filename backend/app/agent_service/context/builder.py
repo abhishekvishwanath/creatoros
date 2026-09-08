@@ -23,6 +23,7 @@ from app.domain.creator.models import (
     VoiceProfile,
 )
 from app.domain.research.models import ResearchSignal, ResearchSource
+from app.domain.strategy.service import list_available_opportunities
 from app.schemas.creator import (
     AudienceProfileRead,
     CreatorGoalRead,
@@ -176,3 +177,17 @@ async def build_research_signals_context(db: AsyncSession, creator: Creator) -> 
             }
         )
     return signals
+
+
+async def build_available_opportunities_context(db: AsyncSession, creator: Creator) -> list[dict]:
+    """Task-specific context slice for the Strategy Engine Agent: opportunities
+    the creator has approved or saved but not yet folded into an activated
+    strategy. Delegates the actual query to
+    app/domain/strategy/service.py::list_available_opportunities so the API
+    layer's notion of "available" and the agent's can never drift apart —
+    this just projects the same ORM rows to the plain dicts the prompt uses."""
+    opportunities = await list_available_opportunities(db, creator_id=creator.id, limit=20)
+    return [
+        {"id": o.id, "topic": o.topic, "subtopic": o.subtopic, "format": o.format, "score": o.score}
+        for o in opportunities
+    ]

@@ -164,3 +164,30 @@ export interface GenerateOpportunitiesResponse {
 }
 
 export type OpportunityStatus = "approved" | "rejected" | "saved_for_later" | "used";
+
+export interface StrategyItemRead {
+  id: string;
+  opportunity_id: string | null;
+  opportunity_topic: string | null;
+  day_of_week: number | null;
+  portfolio_role: string | null;
+  status: string;
+}
+
+export interface StrategyRead {
+  id: string;
+  period_start: string | null;
+  period_end: string | null;
+  summary: string | null;
+  status: "draft" | "active" | "completed";
+  confidence: number | null;
+  created_at: string;
+  items: StrategyItemRead[];
+}
+
+export interface GenerateStrategyResponse {
+  strategy: StrategyRead | null;
+  warnings: string[];
+}
+
+export type StrategyStatus = "draft" | "active" | "completed";

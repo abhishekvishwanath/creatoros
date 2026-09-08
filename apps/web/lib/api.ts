@@ -5,10 +5,13 @@ import type {
   CreatorRead,
   CreatorStateSnapshot,
   GenerateOpportunitiesResponse,
+  GenerateStrategyResponse,
   OpportunityRead,
   OpportunityStatus,
   ResearchSignalCreate,
   ResearchSignalRead,
+  StrategyRead,
+  StrategyStatus,
 } from "./types";
 import { getSession } from "./session";
 
@@ -99,6 +102,21 @@ export function listOpportunities(creatorId: string) {
 
 export function updateOpportunityStatus(creatorId: string, opportunityId: string, status: OpportunityStatus) {
   return request<OpportunityRead>(`/creators/${creatorId}/opportunities/${opportunityId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function generateStrategy(creatorId: string) {
+  return request<GenerateStrategyResponse>(`/creators/${creatorId}/strategy/generate`, { method: "POST" });
+}
+
+export function listStrategies(creatorId: string) {
+  return request<StrategyRead[]>(`/creators/${creatorId}/strategy`);
+}
+
+export function updateStrategyStatus(creatorId: string, strategyId: string, status: StrategyStatus) {
+  return request<StrategyRead>(`/creators/${creatorId}/strategy/${strategyId}`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });

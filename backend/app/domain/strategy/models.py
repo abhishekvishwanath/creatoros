@@ -3,8 +3,8 @@
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import Date, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Date, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import generate_id
 from app.infrastructure.db.base import Base, CreatorScopedMixin, TimestampMixin
@@ -18,6 +18,11 @@ class Strategy(Base, TimestampMixin, CreatorScopedMixin):
     period_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="draft")  # draft | active | completed
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    items: Mapped[list["StrategyItem"]] = relationship(
+        back_populates="strategy", cascade="all, delete-orphan", order_by="StrategyItem.day_of_week"
+    )
 
 
 class StrategyItem(Base, TimestampMixin):
@@ -32,3 +37,9 @@ class StrategyItem(Base, TimestampMixin):
     # reach | authority | community | story | conversion | experimental (CLAUDE.md 21)
     portfolio_role: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="planned")
+
+    strategy: Mapped["Strategy"] = relationship(back_populates="items")
+    # One-directional (no back_populates on Opportunity): only needed here to
+    # eager-load the opportunity's topic/format for display without a
+    # separate round trip per item.
+    opportunity: Mapped[Optional["Opportunity"]] = relationship(viewonly=True)
