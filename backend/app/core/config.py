@@ -17,21 +17,50 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
 
+    # Two interchangeable model providers (CLAUDE.md §12: "model providers ...
+    # can change" — agent code talks to ModelRouter.complete(), never to a
+    # provider SDK directly, so nothing above the router needs to know which
+    # of these is active). Anthropic takes priority if both are set: Groq is
+    # meant as a free interim provider for testing agent prompts/parsing
+    # against a real model before switching to Claude for production.
     anthropic_api_key: str = ""
+    groq_api_key: str = ""
 
-    # Model router tiers (CLAUDE.md 12): strategic synthesis, standard reasoning,
-    # bulk/fast classification. Swap model names here, not in agent code.
-    model_strategic: str = "claude-opus-4-1"
-    model_standard: str = "claude-sonnet-4-5"
-    model_fast: str = "claude-haiku-4-5"
+    # Anthropic model names per tier (CLAUDE.md 12: strategic synthesis,
+    # standard reasoning, bulk/fast classification).
+    model_strategic_anthropic: str = "claude-opus-4-1"
+    model_standard_anthropic: str = "claude-sonnet-4-5"
+    model_fast_anthropic: str = "claude-haiku-4-5"
+
+    # Groq model names per tier — free-tier open-source models. Verified
+    # live against Groq's current catalog (it changes over time; re-check
+    # with client.models.list() if these start 404ing):
+    # - qwen/qwen3.8-27b answers cleanly with no hidden reasoning preamble.
+    # - The openai/gpt-oss-* models are chain-of-thought reasoning models
+    #   whose thinking tokens eat the max_tokens budget before any content
+    #   comes out, so they need a much larger budget for the same task —
+    #   avoided here for cost/latency, not capability.
+    # - allam-2-7b is smaller/faster and still answers cleanly for FAST-tier use.
+    model_strategic_groq: str = "qwen/qwen3.8-27b"
+    model_standard_groq: str = "qwen/qwen3.8-27b"
+    model_fast_groq: str = "allam-2-7b"
 
     web_origin: str = "http://localhost:3000"
 
     @property
+    def model_provider(self) -> str:
+        """Which provider ModelRouter should call. "stub" means no key is
+        configured for either provider — agents fall back to labeled stub
+        output instead of failing (see ModelRouter.complete)."""
+        if self.anthropic_api_key:
+            return "anthropic"
+        if self.groq_api_key:
+            return "groq"
+        return "stub"
+
+    @property
     def agents_live(self) -> bool:
-        """Whether the agent service should make live Claude calls or return
-        structured stubs. Flips on automatically once a key is configured."""
-        return bool(self.anthropic_api_key)
+        return self.model_provider != "stub"
 
 
 @lru_cache

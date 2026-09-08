@@ -4,6 +4,15 @@ os.environ.setdefault(
     "DATABASE_URL", "postgresql+asyncpg://creatoros:creatoros@localhost:5544/creatoros_test"
 )
 
+# The automated test suite must be hermetic: it must never make real network
+# calls to a model provider, regardless of what's in the developer's local
+# backend/.env (a real ANTHROPIC_API_KEY or GROQ_API_KEY there is meant for
+# `uvicorn`/manual testing, not for pytest). Force stub mode explicitly —
+# these env vars, once set, take priority over the .env file for
+# pydantic-settings, so this can't be silently overridden by ambient state.
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["GROQ_API_KEY"] = ""
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
