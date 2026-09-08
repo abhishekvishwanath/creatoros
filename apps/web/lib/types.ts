@@ -113,6 +113,82 @@ export interface ContentItemCreate {
   transcript?: string;
 }
 
+export interface ContentItemRead {
+  id: string;
+  title: string | null;
+  platform: string | null;
+  format: string | null;
+  topic: string | null;
+  status: string;
+  source_type: string;
+  transcript: string | null;
+  opportunity_id: string | null;
+  pillar_id: string | null;
+  created_at: string;
+}
+
+export interface ContentBriefRead {
+  id: string;
+  objective: string | null;
+  core_insight: string | null;
+  angle: string | null;
+  hook_type: string | null;
+  hook: string | null;
+  narrative_structure: Record<string, string> | null;
+  key_points: string[] | null;
+  examples: string[] | null;
+  broll_suggestions: string[] | null;
+  on_screen_text: string[] | null;
+  pacing: string | null;
+  cta: string | null;
+  caption_concept: string | null;
+  cover_concept: string | null;
+  repurposing_opportunities: string[] | null;
+  evidence_ids: string[] | null;
+  risk_notes: string | null;
+}
+
+export interface CriticIssue {
+  type: string;
+  severity: "low" | "medium" | "high";
+  location: string;
+  suggestion: string;
+}
+
+export interface ScriptRead {
+  id: string;
+  brief_id: string | null;
+  version_number: number;
+  platform: string | null;
+  body: string;
+  hook_variants: string[] | null;
+  status: "draft" | "critiqued" | "rewritten" | "final";
+  critic_score: number | null;
+  critic_issues: CriticIssue[] | null;
+}
+
+export interface ContentDetailRead {
+  item: ContentItemRead;
+  brief: ContentBriefRead | null;
+  scripts: ScriptRead[];
+}
+
+export interface GenerateBriefResponse {
+  brief: ContentBriefRead | null;
+  warnings: string[];
+}
+
+export interface GenerateScriptResponse {
+  script: ScriptRead | null;
+  warnings: string[];
+}
+
+export interface ReviewScriptResponse {
+  reviewed: ScriptRead | null;
+  rewrite: ScriptRead | null;
+  warnings: string[];
+}
+
 export interface ResearchSignalCreate {
   topic: string;
   subtopic?: string;

@@ -3,16 +3,21 @@ import type {
   AnalyzeCreatorResponse,
   AudienceSignalCreate,
   AudienceSignalRead,
+  ContentDetailRead,
   ContentItemCreate,
+  ContentItemRead,
   CreatorCreateResponse,
   CreatorRead,
   CreatorStateSnapshot,
+  GenerateBriefResponse,
   GenerateOpportunitiesResponse,
+  GenerateScriptResponse,
   GenerateStrategyResponse,
   OpportunityRead,
   OpportunityStatus,
   ResearchSignalCreate,
   ResearchSignalRead,
+  ReviewScriptResponse,
   StrategyRead,
   StrategyStatus,
 } from "./types";
@@ -79,6 +84,40 @@ export function ingestContent(creatorId: string, payload: ContentItemCreate) {
   return request(`/creators/${creatorId}/content`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function listContentItems(creatorId: string) {
+  return request<ContentItemRead[]>(`/creators/${creatorId}/content`);
+}
+
+export function createContentFromOpportunity(creatorId: string, opportunityId: string) {
+  return request<ContentItemRead>(`/creators/${creatorId}/content/from-opportunity`, {
+    method: "POST",
+    body: JSON.stringify({ opportunity_id: opportunityId }),
+  });
+}
+
+export function getContentDetail(creatorId: string, contentItemId: string) {
+  return request<ContentDetailRead>(`/creators/${creatorId}/content/${contentItemId}`);
+}
+
+export function generateBrief(creatorId: string, contentItemId: string) {
+  return request<GenerateBriefResponse>(`/creators/${creatorId}/content/${contentItemId}/generate-brief`, {
+    method: "POST",
+  });
+}
+
+export function generateScript(creatorId: string, contentItemId: string) {
+  return request<GenerateScriptResponse>(`/creators/${creatorId}/content/${contentItemId}/generate-script`, {
+    method: "POST",
+  });
+}
+
+export function reviewScript(creatorId: string, contentItemId: string, scriptId: string) {
+  return request<ReviewScriptResponse>(`/creators/${creatorId}/content/${contentItemId}/review`, {
+    method: "POST",
+    body: JSON.stringify({ script_id: scriptId }),
   });
 }
 

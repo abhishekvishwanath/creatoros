@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.ids import generate_id
@@ -131,7 +131,16 @@ class ContentBrief(Base, TimestampMixin):
 
 
 class Script(Base, TimestampMixin):
+    """Versioned by version_number (CLAUDE.md §15). Uniquely constrained per
+    content item so a race between two concurrent generate-script/review
+    calls fails loudly (an IntegrityError) rather than silently producing
+    two scripts sharing a version number, which would break the ordering
+    list_scripts and the UI's version picker both assume."""
+
     __tablename__ = "scripts"
+    __table_args__ = (
+        UniqueConstraint("content_item_id", "version_number", name="uq_scripts_content_item_version"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("script"))
     content_item_id: Mapped[str] = mapped_column(

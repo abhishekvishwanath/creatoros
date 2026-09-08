@@ -37,6 +37,7 @@ class BaseAgent(ABC):
         label: str,
         inputs_used: list[str],
         evidence_ids: list[str],
+        max_tokens: int | None = None,
     ) -> tuple[ModelResponse | None, AgentOutput | None]:
         """Wraps model_router.complete() so a real API-level failure (rate
         limit, timeout, network error — as opposed to a malformed-but-present
@@ -46,11 +47,21 @@ class BaseAgent(ABC):
         succeeded (CLAUDE.md §43: a transient provider hiccup on one sub-job
         must not erase results the run already had in hand).
 
+        `max_tokens` defaults to the router's own default when omitted — pass
+        it explicitly only when a sub-job's output shape is unusually large
+        (e.g. a content brief's ~15-field JSON) and needs more room than most
+        agent outputs do. A larger value risks exceeding a given Groq model's
+        free-tier per-request output cap (observed directly: some models
+        reject anything over ~1000 regardless of retries) — that surfaces as
+        a normal RateLimitError here, not a crash, but has no such ceiling on
+        Anthropic.
+
         Returns (response, None) on success, or (None, failed_output) on
         failure — callers `return failure` immediately when it's not None.
         """
+        kwargs = {"max_tokens": max_tokens} if max_tokens is not None else {}
         try:
-            response = await model_router.complete(tier=tier, system=system, user=user)
+            response = await model_router.complete(tier=tier, system=system, user=user, **kwargs)
         except Exception as exc:  # noqa: BLE001 - any provider/network failure, not just ours
             return None, AgentOutput(
                 status="failed",

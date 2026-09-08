@@ -13,6 +13,7 @@ rather than every agent reaching into the ORM directly.
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.content.models import ContentItem, ContentPillar
 from app.domain.creator.models import (
@@ -24,7 +25,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
-from app.domain.research.models import ResearchSignal, ResearchSource
+from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
 from app.domain.strategy.service import list_available_opportunities
 from app.schemas.creator import (
     AudienceProfileRead,
@@ -221,3 +222,46 @@ async def build_available_opportunities_context(db: AsyncSession, creator: Creat
         {"id": o.id, "topic": o.topic, "subtopic": o.subtopic, "format": o.format, "score": o.score}
         for o in opportunities
     ]
+
+
+async def build_content_brief_context(db: AsyncSession, content_item: ContentItem) -> dict:
+    """Task-specific context slice for the Content Architect Agent: the
+    opportunity a content item was derived from (for its angle — not stored
+    on ContentItem itself) plus the research signals that grounded that
+    opportunity, so the brief's evidence_ids can trace all the way back to
+    the original observation (CLAUDE.md §3.4/§16), not just to the
+    opportunity that sits between them."""
+    opportunity = None
+    evidence_signals: list[dict] = []
+    if content_item.opportunity_id:
+        result = await db.execute(
+            select(Opportunity)
+            .options(selectinload(Opportunity.evidence))
+            .where(Opportunity.id == content_item.opportunity_id)
+        )
+        opportunity = result.scalar_one_or_none()
+        if opportunity:
+            signal_ids = [e.research_signal_id for e in opportunity.evidence if e.research_signal_id]
+            if signal_ids:
+                sig_result = await db.execute(select(ResearchSignal).where(ResearchSignal.id.in_(signal_ids)))
+                for s in sig_result.scalars().all():
+                    evidence_signals.append(
+                        {"id": s.id, "topic": s.topic, "summary": (s.content_features or {}).get("summary", "")}
+                    )
+
+    pillar_name = None
+    if content_item.pillar_id:
+        pillar = await db.get(ContentPillar, content_item.pillar_id)
+        pillar_name = pillar.name if pillar else None
+
+    return {
+        "content_item": {
+            "id": content_item.id,
+            "topic": content_item.topic,
+            "format": content_item.format,
+            "title": content_item.title,
+        },
+        "opportunity": {"angle": opportunity.angle, "subtopic": opportunity.subtopic} if opportunity else None,
+        "pillar_name": pillar_name,
+        "evidence_signals": evidence_signals,
+    }

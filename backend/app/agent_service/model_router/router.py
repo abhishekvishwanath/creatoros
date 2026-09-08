@@ -66,7 +66,13 @@ class ModelRouter:
         tier: ModelTier,
         system: str,
         user: str,
-        max_tokens: int = 1024,
+        # Kept under 1000: Groq's free/on-demand tier enforces a hard
+        # output-tokens-per-request ceiling of 1000 for at least some models
+        # (observed directly: 1024 is rejected outright with "Request too
+        # large... OTPM: Limit 1000, Requested 1024", not a transient rate
+        # limit that clears with time). Anthropic has no such constraint at
+        # this size, so this default costs it nothing.
+        max_tokens: int = 900,
     ) -> ModelResponse:
         provider = self._settings.model_provider
         started = monotonic()
@@ -126,6 +132,20 @@ class ModelRouter:
 
             self._groq_client = AsyncGroq(api_key=self._settings.groq_api_key)
 
+        kwargs = {}
+        if self._is_reasoning_model(model):
+            # Reasoning models (e.g. openai/gpt-oss-20b) spend output tokens
+            # on a hidden reasoning trace before the actual answer — observed
+            # directly: on a realistic prompt, unconstrained reasoning ate the
+            # entire max_tokens budget and left an EMPTY content field (a
+            # silent, not-obviously-a-truncation failure downstream in
+            # _parse_json). "low" keeps enough of max_tokens free for the
+            # actual JSON response. Groq rejects this parameter outright on
+            # non-reasoning models (e.g. allam-2-7b), so it's only sent when
+            # the configured model is known to support it. No equivalent
+            # parameter exists for Anthropic, so this only applies here.
+            kwargs["reasoning_effort"] = "low"
+
         response = await self._groq_client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
@@ -133,10 +153,19 @@ class ModelRouter:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            **kwargs,
         )
         text = response.choices[0].message.content or ""
         usage = response.usage
         return text, (usage.prompt_tokens if usage else 0), (usage.completion_tokens if usage else 0)
+
+    @staticmethod
+    def _is_reasoning_model(model: str) -> bool:
+        """Known Groq model families that emit a separate reasoning trace and
+        accept `reasoning_effort`. Update if MODEL_*_GROQ in .env changes to
+        a different reasoning family — see the caller's comment for why this
+        can't just be sent unconditionally."""
+        return any(family in model for family in ("gpt-oss", "qwen", "deepseek", "kimi"))
 
     @staticmethod
     def _stub_text() -> str:
