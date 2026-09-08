@@ -129,6 +129,25 @@ async def test_analyze_with_ingested_content_still_skips_voice_in_stub_mode(clie
     assert resp.json()["state"]["voice"] is None
 
 
+async def test_analyze_skips_pillars_below_minimum_content(client):
+    """Stub mode never proposes pillars anyway (no honest fallback), but this
+    also covers the below-threshold path: with only 2 pieces of content
+    (PILLAR_ANALYSIS_MIN_ITEMS is 3), pillar analysis shouldn't even run."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="jack@example.com", name="Jack")
+    headers = {"X-Debug-User-Id": user_id}
+
+    for i in range(2):
+        await client.post(
+            f"/creators/{creator_id}/content",
+            json={"title": f"Post {i}", "transcript": "some content"},
+            headers=headers,
+        )
+
+    resp = await client.post(f"/creators/{creator_id}/analyze", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["state"]["content_pillars"] == []
+
+
 async def test_analyze_enforces_tenant_isolation(client):
     creator_id, _ = await _create_creator_and_get_user_id(client)
     resp = await client.post(

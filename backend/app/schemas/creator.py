@@ -104,6 +104,7 @@ class CreatorStateSnapshot(BaseModel):
     audience: Optional[AudienceProfileRead] = None
     active_goals: list[CreatorGoalRead] = Field(default_factory=list)
     recent_content: list[dict] = Field(default_factory=list)
+    content_pillars: list[dict] = Field(default_factory=list)
     top_performing_content: list[dict] = Field(default_factory=list)
     recent_failures: list[dict] = Field(default_factory=list)
     current_research_signals: list[dict] = Field(default_factory=list)

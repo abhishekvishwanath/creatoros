@@ -71,6 +71,12 @@ export interface RecentContentSummary {
   has_transcript: boolean;
 }
 
+export interface ContentPillarSummary {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
 export interface CreatorStateSnapshot {
   creator: CreatorRead;
   positioning: CreatorProfileRead | null;
@@ -78,6 +84,7 @@ export interface CreatorStateSnapshot {
   audience: AudienceProfileRead | null;
   active_goals: CreatorGoalRead[];
   recent_content: RecentContentSummary[];
+  content_pillars: ContentPillarSummary[];
   top_performing_content: unknown[];
   recent_failures: unknown[];
   current_research_signals: unknown[];

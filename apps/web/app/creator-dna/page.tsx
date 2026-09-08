@@ -145,11 +145,22 @@ export default function CreatorDnaPage() {
             <CardDescription>The recurring topics you own.</CardDescription>
           </CardHeader>
           <CardContent>
-            <EmptyState
-              icon={Dna}
-              title="No pillars yet"
-              description="Pillars emerge from your content history once enough of it is analyzed."
-            />
+            {state?.content_pillars && state.content_pillars.length > 0 ? (
+              <ul className="space-y-3">
+                {state.content_pillars.map((p) => (
+                  <li key={p.id}>
+                    <p className="text-sm font-medium text-ink">{p.name}</p>
+                    {p.description && <p className="text-sm text-subtle">{p.description}</p>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={Dna}
+                title="No pillars yet"
+                description="Pillars emerge once at least 3 pieces of content with transcripts have been ingested and analyzed."
+              />
+            )}
           </CardContent>
         </Card>
 

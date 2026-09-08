@@ -14,7 +14,7 @@ rather than every agent reaching into the ORM directly.
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.content.models import ContentItem
+from app.domain.content.models import ContentItem, ContentPillar
 from app.domain.creator.models import (
     AudienceProfile,
     Creator,
@@ -81,6 +81,11 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         for c in content_result.scalars().all()
     ]
 
+    pillars_result = await db.execute(select(ContentPillar).where(ContentPillar.creator_id == creator.id))
+    content_pillars = [
+        {"id": p.id, "name": p.name, "description": p.description} for p in pillars_result.scalars().all()
+    ]
+
     return CreatorStateSnapshot(
         creator=CreatorRead.model_validate(creator),
         positioning=CreatorProfileRead.model_validate(profile) if profile else None,
@@ -88,6 +93,7 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         audience=AudienceProfileRead.model_validate(audience) if audience else None,
         active_goals=[CreatorGoalRead.model_validate(g) for g in goals],
         recent_content=recent_content,
+        content_pillars=content_pillars,
     )
 
 
@@ -96,13 +102,14 @@ VOICE_ANALYSIS_CHAR_LIMIT = 2000
 
 
 async def build_voice_analysis_transcripts(db: AsyncSession, creator: Creator) -> list[dict]:
-    """Task-specific context slice for voice inference (CLAUDE.md §10): unlike
-    the UI-facing snapshot above, which only carries content *metadata* to
-    stay bounded, the Creator Intelligence Agent's voice-analysis step needs
-    actual transcript text. Kept separate rather than added to
-    CreatorStateSnapshot so the read endpoint never ships full transcript text
-    to the browser on every page load — this is deliberately narrower, pulled
-    only when an agent asks for it.
+    """Task-specific context slice for voice AND content-pillar inference
+    (CLAUDE.md §10): unlike the UI-facing snapshot above, which only carries
+    content *metadata* to stay bounded, both of those sub-jobs need actual
+    transcript text. Kept separate rather than added to CreatorStateSnapshot
+    so the read endpoint never ships full transcript text to the browser on
+    every page load — this is deliberately narrower, pulled only when an
+    agent asks for it, and the same sample is reused for both sub-jobs rather
+    than querying twice.
 
     Each item keeps its content_item id alongside the (truncated) text so the
     agent can cite exactly which content it drew a voice trait from

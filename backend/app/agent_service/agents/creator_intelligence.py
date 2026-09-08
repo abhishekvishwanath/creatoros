@@ -1,6 +1,6 @@
 """Creator Intelligence Agent (CLAUDE.md §11.1).
 
-Two independent sub-jobs, each honest about its own evidence ceiling:
+Three independent sub-jobs, each honest about its own evidence ceiling:
 
 1. Positioning — from onboarding fields alone (name, niche, business model,
    goals). There's no ingested content to ground this in yet, so it's kept
@@ -12,13 +12,18 @@ Two independent sub-jobs, each honest about its own evidence ceiling:
    were available, capped well below "high" until there's a real content
    history to draw on, and every claim is anchored to the specific content
    items it was inferred from (CLAUDE.md §3.4 evidence over vibes).
+
+3. Content pillars — recurring topics, only attempted once there's enough
+   content to call something "recurring" (a single post can't be a pillar).
+   Additive rather than replacing: see app/domain/content/service.py.
 """
 
+import asyncio
 import json
 import re
 
 from app.agent_service.agents.base import BaseAgent
-from app.agent_service.model_router.router import ModelRouter, ModelTier
+from app.agent_service.model_router.router import ModelResponse, ModelRouter, ModelTier
 from app.agent_service.schemas.contracts import AgentOutput
 from app.schemas.creator import CreatorStateSnapshot
 
@@ -52,6 +57,21 @@ Respond with ONLY a JSON object, no markdown fences, matching exactly:
  "signature_phrases": string[], "cta_style": string}
 """
 
+PILLARS_SYSTEM_PROMPT = """You are the Creator Intelligence Agent inside a Creator \
+Intelligence OS. You will be given excerpts from a creator's own past content, \
+each labeled with a content id. Identify 2 to 5 recurring content pillars — \
+themes this creator seems to organize their content around, not a summary of \
+each individual piece.
+
+Only propose a pillar if at least two of the excerpts genuinely support it. \
+Do not invent pillars from a single data point.
+
+Respond with ONLY a JSON object, no markdown fences, matching exactly:
+{"pillars": [{"name": string, "description": string, "content_ids": string[]}]}
+"""
+
+PILLAR_ANALYSIS_MIN_ITEMS = 3
+
 
 class CreatorIntelligenceAgent(BaseAgent):
     name = "creator_intelligence"
@@ -63,22 +83,33 @@ class CreatorIntelligenceAgent(BaseAgent):
         model_router: ModelRouter,
         voice_transcripts: list[dict] | None = None,
     ) -> AgentOutput:
-        positioning_output = await self._analyze_positioning(context, model_router)
-        if not voice_transcripts:
-            return positioning_output
+        # The sub-jobs are mutually independent (none reads another's
+        # output), so run them concurrently rather than paying the sum of
+        # three model round-trips in request latency.
+        tasks = [self._analyze_positioning(context, model_router)]
+        if voice_transcripts:
+            tasks.append(self._analyze_voice(voice_transcripts, model_router))
+            if len(voice_transcripts) >= PILLAR_ANALYSIS_MIN_ITEMS:
+                tasks.append(self._analyze_pillars(voice_transcripts, model_router))
 
-        voice_output = await self._analyze_voice(voice_transcripts, model_router)
+        outputs = await asyncio.gather(*tasks)
 
+        if len(outputs) == 1:
+            return outputs[0]
+        return self._combine(outputs)
+
+    @staticmethod
+    def _combine(outputs: list[AgentOutput]) -> AgentOutput:
         # Each proposed_state_changes entry carries its own confidence/
-        # evidence_ids (positioning and voice are different claims with
-        # different evidence) — the top-level fields below are only a
+        # evidence_ids (positioning, voice, and pillars are different claims
+        # with different evidence) — the top-level fields below are only a
         # summary of the combined run, not what gets written to the DB.
         #
         # Status must reflect a single sub-job failure honestly: collapsing
-        # "positioning failed, voice succeeded" into "success" would silently
-        # drop the positioning failure (and its warning) on the floor — the
-        # caller needs "partial" to know one half didn't actually happen.
-        failures = [o.status == "failed" for o in (positioning_output, voice_output)]
+        # "positioning failed, the rest succeeded" into "success" would
+        # silently drop that failure (and its warning) on the floor — the
+        # caller needs "partial" to know not everything actually happened.
+        failures = [o.status == "failed" for o in outputs]
         if all(failures):
             combined_status = "failed"
         elif any(failures):
@@ -86,16 +117,27 @@ class CreatorIntelligenceAgent(BaseAgent):
         else:
             combined_status = "success"
 
+        combined_evidence_ids: list[str] = []
+        combined_inputs_used: list[str] = []
+        combined_changes: list[dict] = []
+        combined_warnings: list[str] = []
+        next_action = None
+        for o in outputs:
+            combined_evidence_ids += o.evidence_ids
+            combined_inputs_used += o.inputs_used
+            combined_changes += o.proposed_state_changes
+            combined_warnings += o.warnings
+            next_action = o.next_action or next_action
+
         return AgentOutput(
             status=combined_status,
-            summary=f"{positioning_output.summary} {voice_output.summary}",
-            confidence=max(positioning_output.confidence, voice_output.confidence),
-            inputs_used=positioning_output.inputs_used + voice_output.inputs_used,
-            evidence_ids=positioning_output.evidence_ids + voice_output.evidence_ids,
-            proposed_state_changes=positioning_output.proposed_state_changes
-            + voice_output.proposed_state_changes,
-            next_action=voice_output.next_action or positioning_output.next_action,
-            warnings=positioning_output.warnings + voice_output.warnings,
+            summary=" ".join(o.summary for o in outputs),
+            confidence=max(o.confidence for o in outputs),
+            inputs_used=combined_inputs_used,
+            evidence_ids=combined_evidence_ids,
+            proposed_state_changes=combined_changes,
+            next_action=next_action,
+            warnings=combined_warnings,
         )
 
     async def _analyze_positioning(
@@ -120,17 +162,23 @@ class CreatorIntelligenceAgent(BaseAgent):
             user_parts.append(f"Active goals: {goal_lines}")
             inputs_used.append("creator_goals")
 
-        response = await model_router.complete(
+        response, failure = await self._complete_safely(
+            model_router,
             tier=ModelTier.STANDARD,
             system=POSITIONING_SYSTEM_PROMPT,
             user="\n".join(user_parts),
+            label="Positioning",
+            inputs_used=inputs_used,
+            evidence_ids=[],
         )
+        if failure:
+            return failure
 
         if response.stub:
             data = self._fallback_positioning(creator.name, creator.niche, creator.sub_niche)
             warnings = [
-                "ANTHROPIC_API_KEY not configured — this positioning is a rule-based "
-                "placeholder, not a model inference. Set the key to get a real synthesis."
+                "No ANTHROPIC_API_KEY or GROQ_API_KEY configured — this positioning is a "
+                "rule-based placeholder, not a model inference. Set one to get a real synthesis."
             ]
         else:
             try:
@@ -167,22 +215,28 @@ class CreatorIntelligenceAgent(BaseAgent):
             f"[{t['id']}] {t.get('title') or 'untitled'}:\n{t['transcript']}" for t in voice_transcripts
         )
 
-        response = await model_router.complete(
+        response, failure = await self._complete_safely(
+            model_router,
             tier=ModelTier.STANDARD,
             system=VOICE_SYSTEM_PROMPT,
             user=excerpt_blocks,
+            label="Voice",
+            inputs_used=["content.transcripts"],
+            evidence_ids=evidence_ids,
         )
+        if failure:
+            return failure
 
         if response.stub:
             return AgentOutput(
                 status="success",
-                summary="Voice: skipped (no ANTHROPIC_API_KEY configured, and voice inference has no honest rule-based fallback).",
+                summary="Voice: skipped (no model provider configured, and voice inference has no honest rule-based fallback).",
                 confidence=0.0,
                 inputs_used=["content.transcripts"],
                 evidence_ids=evidence_ids,
                 warnings=[
-                    "ANTHROPIC_API_KEY not configured — voice inference needs a real model "
-                    "read of the transcripts, so it was skipped rather than guessed."
+                    "No ANTHROPIC_API_KEY or GROQ_API_KEY configured — voice inference needs a "
+                    "real model read of the transcripts, so it was skipped rather than guessed."
                 ],
             )
 
@@ -219,6 +273,114 @@ class CreatorIntelligenceAgent(BaseAgent):
             next_action="Ingest more content to raise confidence in this voice profile.",
             warnings=[],
         )
+
+    async def _analyze_pillars(
+        self, content_sample: list[dict], model_router: ModelRouter
+    ) -> AgentOutput:
+        all_ids = [c["id"] for c in content_sample]
+        excerpt_blocks = "\n\n".join(
+            f"[{c['id']}] {c.get('title') or 'untitled'}:\n{c['transcript'][:500]}" for c in content_sample
+        )
+
+        response, failure = await self._complete_safely(
+            model_router,
+            tier=ModelTier.STANDARD,
+            system=PILLARS_SYSTEM_PROMPT,
+            user=excerpt_blocks,
+            label="Pillars",
+            inputs_used=["content.excerpts"],
+            evidence_ids=all_ids,
+        )
+        if failure:
+            return failure
+
+        if response.stub:
+            return AgentOutput(
+                status="success",
+                summary="Pillars: skipped (no model provider configured, and pillar inference has no honest rule-based fallback).",
+                confidence=0.0,
+                inputs_used=["content.excerpts"],
+                evidence_ids=all_ids,
+                warnings=[
+                    "No ANTHROPIC_API_KEY or GROQ_API_KEY configured — pillar inference needs a "
+                    "real model read of the content, so it was skipped rather than guessed."
+                ],
+            )
+
+        try:
+            data = self._parse_json(response.text, required_key="pillars")
+        except ValueError as exc:
+            return AgentOutput(
+                status="failed",
+                summary="Pillars: model response could not be parsed as the expected JSON shape.",
+                confidence=0.0,
+                inputs_used=["content.excerpts"],
+                evidence_ids=all_ids,
+                warnings=[str(exc)],
+            )
+
+        pillars = data.get("pillars", [])
+        # Confidence tracks how much of the sample actually grounds a pillar,
+        # not just sample size — a model that cites every excerpt across its
+        # proposed pillars is on firmer ground than one that only used one.
+        cited_ids = {cid for p in pillars for cid in p.get("content_ids", [])}
+        coverage = len(cited_ids & set(all_ids)) / len(all_ids) if all_ids else 0.0
+        confidence = round(min(0.3 + 0.3 * coverage, 0.6), 2)
+
+        return AgentOutput(
+            status="success",
+            summary=f"Identified {len(pillars)} recurring content pillar(s) from {len(content_sample)} ingested item(s).",
+            confidence=confidence,
+            inputs_used=["content.excerpts"],
+            evidence_ids=all_ids,
+            proposed_state_changes=[
+                {
+                    "type": "content_pillars_upsert",
+                    "data": {"pillars": pillars},
+                    "confidence": confidence,
+                    "evidence_ids": all_ids,
+                }
+            ]
+            if pillars
+            else [],
+            next_action="Ingest more content to refine these pillars." if pillars else None,
+            warnings=[],
+        )
+
+    @staticmethod
+    async def _complete_safely(
+        model_router: ModelRouter,
+        *,
+        tier: ModelTier,
+        system: str,
+        user: str,
+        label: str,
+        inputs_used: list[str],
+        evidence_ids: list[str],
+    ) -> tuple[ModelResponse | None, AgentOutput | None]:
+        """Wraps model_router.complete() so a real API-level failure (rate
+        limit, timeout, network error — as opposed to a malformed-but-present
+        response) becomes a "failed" AgentOutput for *this sub-job only*,
+        instead of an uncaught exception that the Orchestrator would turn
+        into a total run failure and discard whatever other sub-jobs already
+        succeeded (CLAUDE.md §43: a transient provider hiccup on one sub-job
+        must not erase results the run already had in hand).
+
+        Returns (response, None) on success, or (None, failed_output) on
+        failure — callers `return failure` immediately when it's not None.
+        """
+        try:
+            response = await model_router.complete(tier=tier, system=system, user=user)
+        except Exception as exc:  # noqa: BLE001 - any provider/network failure, not just ours
+            return None, AgentOutput(
+                status="failed",
+                summary=f"{label}: model call failed ({type(exc).__name__}).",
+                confidence=0.0,
+                inputs_used=inputs_used,
+                evidence_ids=evidence_ids,
+                warnings=[str(exc)],
+            )
+        return response, None
 
     @staticmethod
     def _parse_json(text: str, *, required_key: str) -> dict:

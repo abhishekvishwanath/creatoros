@@ -6,6 +6,7 @@ from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
 from app.agent_service.agents.creator_intelligence import CreatorIntelligenceAgent
 from app.api.deps import DbSession, get_owned_creator
+from app.domain.content.service import sync_content_pillars
 from app.domain.creator.models import Creator, User
 from app.domain.creator.service import apply_creator_profile_update, apply_voice_profile_update
 from app.schemas.creator import (
@@ -68,12 +69,13 @@ async def get_creator_state(db: DbSession, creator: Creator = Depends(get_owned_
 @router.post("/{creator_id}/analyze", response_model=AnalyzeCreatorResponse)
 async def analyze_creator(db: DbSession, creator: Creator = Depends(get_owned_creator)) -> AnalyzeCreatorResponse:
     """Runs the Creator Intelligence Agent (CLAUDE.md §11.1) to (re)build this
-    creator's positioning and, if content has been ingested, voice. This is
-    the application-service layer: it invokes the agent service, then applies
-    whatever it proposes through the domain state service — the agent itself
-    never touches the database directly (CLAUDE.md §8.3).
+    creator's positioning and, if enough content has been ingested, voice and
+    content pillars. This is the application-service layer: it invokes the
+    agent service, then applies whatever it proposes through the domain state
+    service — the agent itself never touches the database directly
+    (CLAUDE.md §8.3).
 
-    The agent's two sub-jobs (positioning, voice) can fail independently
+    The agent's sub-jobs (positioning, voice, pillars) can fail independently
     (status="partial") — only a total failure (status="failed", nothing to
     apply) is a hard error. A partial failure still commits whatever
     succeeded and returns its warnings so the caller can see exactly what
@@ -119,6 +121,10 @@ async def analyze_creator(db: DbSession, creator: Creator = Depends(get_owned_cr
                 data=change["data"],
                 confidence=change.get("confidence", 0.0),
                 evidence_ids=change.get("evidence_ids", []),
+            )
+        elif change_type == "content_pillars_upsert":
+            await sync_content_pillars(
+                db, creator_id=creator.id, pillars=change["data"].get("pillars", [])
             )
 
     await db.commit()
