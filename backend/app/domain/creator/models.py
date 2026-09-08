@@ -131,9 +131,22 @@ class VoiceProfile(Base, TimestampMixin, CreatorScopedMixin):
 
 
 class AudienceProfile(Base, TimestampMixin, CreatorScopedMixin):
-    """CLAUDE.md 7.2 audience. Versioned, creator-wide (not segment-specific)."""
+    """CLAUDE.md 7.2 audience. Versioned, creator-wide (not segment-specific).
+
+    See CreatorProfile's docstring for why is_current is uniquely constrained
+    per creator — this table originally shipped without it (a gap fixed
+    alongside the Audience Intelligence Agent, the first thing to actually
+    write to it)."""
 
     __tablename__ = "audience_profiles"
+    __table_args__ = (
+        Index(
+            "ux_audience_profiles_current",
+            "creator_id",
+            unique=True,
+            postgresql_where=text("is_current"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("audience_profile"))
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -169,6 +182,24 @@ class AudienceSegment(Base, TimestampMixin, CreatorScopedMixin):
 
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     sample_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    evidence_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+
+
+class AudienceSignal(Base, TimestampMixin, CreatorScopedMixin):
+    """Raw audience voice (CLAUDE.md 19): a comment, question, or piece of
+    feedback the creator (or their team) observed, pasted in manually since
+    no comments/analytics API is connected yet — same pattern as
+    ResearchSignal for market/competitor signals (app/domain/research/models.py),
+    kept as its own concept because a raw audience quote and a competitor
+    content observation are different kinds of evidence for different
+    agents. This is the raw material the Audience Intelligence Agent reads;
+    AudienceProfile and AudienceSegment are its synthesized output."""
+
+    __tablename__ = "audience_signals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("audience_signal"))
+    text: Mapped[str] = mapped_column(Text)
+    source_platform: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
 class CreatorGoal(Base, TimestampMixin, CreatorScopedMixin):

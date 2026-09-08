@@ -157,7 +157,7 @@ class StrategyEngineAgent(BaseAgent):
 
         used_ids = {item["opportunity_id"] for item in valid_items}
         coverage = len(used_ids) / len(valid_ids) if valid_ids else 0.0
-        confidence = round(min(0.3 + 0.3 * coverage, 0.6), 2)
+        confidence = self._coverage_confidence(coverage)
 
         dropped = len(raw_items) - len(valid_items)
         warnings = [f"Dropped {dropped} proposed item(s) with an invalid opportunity id, day, role, or day collision."] if dropped else []

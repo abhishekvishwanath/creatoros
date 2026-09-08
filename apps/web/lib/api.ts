@@ -1,5 +1,8 @@
 import type {
+  AnalyzeAudienceResponse,
   AnalyzeCreatorResponse,
+  AudienceSignalCreate,
+  AudienceSignalRead,
   ContentItemCreate,
   CreatorCreateResponse,
   CreatorRead,
@@ -120,4 +123,19 @@ export function updateStrategyStatus(creatorId: string, strategyId: string, stat
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+}
+
+export function createAudienceSignal(creatorId: string, payload: AudienceSignalCreate) {
+  return request<AudienceSignalRead>(`/creators/${creatorId}/audience-signals`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listAudienceSignals(creatorId: string) {
+  return request<AudienceSignalRead[]>(`/creators/${creatorId}/audience-signals`);
+}
+
+export function analyzeAudience(creatorId: string) {
+  return request<AnalyzeAudienceResponse>(`/creators/${creatorId}/audience/analyze`, { method: "POST" });
 }

@@ -152,7 +152,7 @@ class OpportunityEngineAgent(BaseAgent):
 
         cited_ids = {sid for o in grounded for sid in o["evidence_signal_ids"]}
         coverage = len(cited_ids) / len(valid_ids) if valid_ids else 0.0
-        confidence = round(min(0.3 + 0.3 * coverage, 0.6), 2)
+        confidence = self._coverage_confidence(coverage)
         for o in grounded:
             o["confidence"] = confidence
 

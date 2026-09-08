@@ -78,8 +78,50 @@ class AudienceProfileRead(BaseModel):
     purchase_intent: Optional[str] = None
     preferred_language: Optional[str] = None
     confidence: float = 0.0
+    sample_size: Optional[int] = None
 
     model_config = {"from_attributes": True}
+
+
+class AudienceSegmentRead(BaseModel):
+    id: str
+    name: str
+    problems: Optional[list] = None
+    desires: Optional[list] = None
+    objections: Optional[list] = None
+    questions: Optional[list] = None
+    fears: Optional[list] = None
+    aspirations: Optional[list] = None
+    language: Optional[list] = None
+    knowledge_level: Optional[str] = None
+    confidence: float = 0.0
+    sample_size: Optional[int] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AudienceSignalCreate(BaseModel):
+    """Manual audience signal ingestion (CLAUDE.md §19) — no comments/
+    analytics API is connected yet, so a creator pastes in a comment,
+    question, or piece of feedback they observed."""
+
+    text: str
+    source_platform: Optional[str] = None
+
+
+class AudienceSignalRead(BaseModel):
+    id: str
+    text: str
+    source_platform: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AnalyzeAudienceResponse(BaseModel):
+    audience: Optional[AudienceProfileRead] = None
+    segments: list[AudienceSegmentRead] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CreatorGoalRead(BaseModel):
@@ -105,6 +147,7 @@ class CreatorStateSnapshot(BaseModel):
     active_goals: list[CreatorGoalRead] = Field(default_factory=list)
     recent_content: list[dict] = Field(default_factory=list)
     content_pillars: list[dict] = Field(default_factory=list)
+    audience_segments: list[AudienceSegmentRead] = Field(default_factory=list)
     top_performing_content: list[dict] = Field(default_factory=list)
     recent_failures: list[dict] = Field(default_factory=list)
     current_research_signals: list[dict] = Field(default_factory=list)

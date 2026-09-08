@@ -72,3 +72,57 @@ class BaseAgent(ABC):
         if required_key not in data:
             raise ValueError(f"model JSON missing '{required_key}'")
         return data
+
+    @staticmethod
+    def _coverage_confidence(coverage: float) -> float:
+        """Shared confidence formula for any sub-job that grounds its output
+        in a fixed set of evidence ids (pillars, opportunities, strategy
+        items, audience segments): confidence rises with how much of the
+        available evidence was actually cited, capped at 0.6 — evidence
+        coverage is a signal of good grounding, not a substitute for the
+        higher confidence only a validated track record could earn."""
+        return round(min(0.3 + 0.3 * coverage, 0.6), 2)
+
+    @staticmethod
+    def _combine(outputs: list[AgentOutput]) -> AgentOutput:
+        """Merges independent sub-job outputs (e.g. CreatorIntelligenceAgent's
+        positioning/voice/pillars, AudienceIntelligenceAgent's profile/
+        segments) into one. Each proposed_state_changes entry keeps its own
+        confidence/evidence_ids — the top-level fields here only summarize
+        the combined run, not what gets written to the DB.
+
+        Status must reflect a single sub-job failure honestly: collapsing
+        "one sub-job failed, the rest succeeded" into "success" would
+        silently drop that failure (and its warning) on the floor — the
+        caller needs "partial" to know not everything actually happened.
+        """
+        failures = [o.status == "failed" for o in outputs]
+        if all(failures):
+            combined_status = "failed"
+        elif any(failures):
+            combined_status = "partial"
+        else:
+            combined_status = "success"
+
+        combined_evidence_ids: list[str] = []
+        combined_inputs_used: list[str] = []
+        combined_changes: list[dict] = []
+        combined_warnings: list[str] = []
+        next_action = None
+        for o in outputs:
+            combined_evidence_ids += o.evidence_ids
+            combined_inputs_used += o.inputs_used
+            combined_changes += o.proposed_state_changes
+            combined_warnings += o.warnings
+            next_action = o.next_action or next_action
+
+        return AgentOutput(
+            status=combined_status,
+            summary=" ".join(o.summary for o in outputs),
+            confidence=max(o.confidence for o in outputs),
+            inputs_used=combined_inputs_used,
+            evidence_ids=combined_evidence_ids,
+            proposed_state_changes=combined_changes,
+            next_action=next_action,
+            warnings=combined_warnings,
+        )

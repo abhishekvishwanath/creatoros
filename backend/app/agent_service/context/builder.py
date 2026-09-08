@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.content.models import ContentItem, ContentPillar
 from app.domain.creator.models import (
     AudienceProfile,
+    AudienceSegment,
+    AudienceSignal,
     Creator,
     CreatorGoal,
     CreatorProfile,
@@ -26,6 +28,7 @@ from app.domain.research.models import ResearchSignal, ResearchSource
 from app.domain.strategy.service import list_available_opportunities
 from app.schemas.creator import (
     AudienceProfileRead,
+    AudienceSegmentRead,
     CreatorGoalRead,
     CreatorProfileRead,
     CreatorRead,
@@ -102,6 +105,9 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         for s in signals_result.scalars().all()
     ]
 
+    segments_result = await db.execute(select(AudienceSegment).where(AudienceSegment.creator_id == creator.id))
+    audience_segments = [AudienceSegmentRead.model_validate(s) for s in segments_result.scalars().all()]
+
     return CreatorStateSnapshot(
         creator=CreatorRead.model_validate(creator),
         positioning=CreatorProfileRead.model_validate(profile) if profile else None,
@@ -111,6 +117,7 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         recent_content=recent_content,
         content_pillars=content_pillars,
         current_research_signals=current_research_signals,
+        audience_segments=audience_segments,
     )
 
 
@@ -177,6 +184,29 @@ async def build_research_signals_context(db: AsyncSession, creator: Creator) -> 
             }
         )
     return signals
+
+
+AUDIENCE_SIGNALS_CONTEXT_MAX_ITEMS = 30
+AUDIENCE_SIGNAL_CHAR_LIMIT = 1000
+
+
+async def build_audience_signals_context(db: AsyncSession, creator: Creator) -> list[dict]:
+    """Task-specific context slice for the Audience Intelligence Agent: the
+    actual comment/question/feedback text (bounded per item, like
+    build_voice_analysis_transcripts) rather than the metadata-only list a
+    future audience-signals UI page would read. A higher item cap than
+    voice/research (30 vs 20) since these are short quotes, not full
+    transcripts or observation summaries."""
+    result = await db.execute(
+        select(AudienceSignal)
+        .where(AudienceSignal.creator_id == creator.id)
+        .order_by(desc(AudienceSignal.created_at))
+        .limit(AUDIENCE_SIGNALS_CONTEXT_MAX_ITEMS)
+    )
+    return [
+        {"id": s.id, "text": s.text[:AUDIENCE_SIGNAL_CHAR_LIMIT], "source_platform": s.source_platform}
+        for s in result.scalars().all()
+    ]
 
 
 async def build_available_opportunities_context(db: AsyncSession, creator: Creator) -> list[dict]:

@@ -96,48 +96,6 @@ class CreatorIntelligenceAgent(BaseAgent):
             return outputs[0]
         return self._combine(outputs)
 
-    @staticmethod
-    def _combine(outputs: list[AgentOutput]) -> AgentOutput:
-        # Each proposed_state_changes entry carries its own confidence/
-        # evidence_ids (positioning, voice, and pillars are different claims
-        # with different evidence) — the top-level fields below are only a
-        # summary of the combined run, not what gets written to the DB.
-        #
-        # Status must reflect a single sub-job failure honestly: collapsing
-        # "positioning failed, the rest succeeded" into "success" would
-        # silently drop that failure (and its warning) on the floor — the
-        # caller needs "partial" to know not everything actually happened.
-        failures = [o.status == "failed" for o in outputs]
-        if all(failures):
-            combined_status = "failed"
-        elif any(failures):
-            combined_status = "partial"
-        else:
-            combined_status = "success"
-
-        combined_evidence_ids: list[str] = []
-        combined_inputs_used: list[str] = []
-        combined_changes: list[dict] = []
-        combined_warnings: list[str] = []
-        next_action = None
-        for o in outputs:
-            combined_evidence_ids += o.evidence_ids
-            combined_inputs_used += o.inputs_used
-            combined_changes += o.proposed_state_changes
-            combined_warnings += o.warnings
-            next_action = o.next_action or next_action
-
-        return AgentOutput(
-            status=combined_status,
-            summary=" ".join(o.summary for o in outputs),
-            confidence=max(o.confidence for o in outputs),
-            inputs_used=combined_inputs_used,
-            evidence_ids=combined_evidence_ids,
-            proposed_state_changes=combined_changes,
-            next_action=next_action,
-            warnings=combined_warnings,
-        )
-
     async def _analyze_positioning(
         self, context: CreatorStateSnapshot, model_router: ModelRouter
     ) -> AgentOutput:
@@ -323,7 +281,7 @@ class CreatorIntelligenceAgent(BaseAgent):
         # proposed pillars is on firmer ground than one that only used one.
         cited_ids = {cid for p in pillars for cid in p.get("content_ids", [])}
         coverage = len(cited_ids & set(all_ids)) / len(all_ids) if all_ids else 0.0
-        confidence = round(min(0.3 + 0.3 * coverage, 0.6), 2)
+        confidence = self._coverage_confidence(coverage)
 
         return AgentOutput(
             status="success",

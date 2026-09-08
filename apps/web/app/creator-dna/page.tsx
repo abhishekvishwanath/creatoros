@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
-import { Dna, Mic, Users, Target, Shield, Sparkles } from "lucide-react";
+import { Dna, Mic, Users, Target, Shield, Sparkles, HeartHandshake } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { ContentLibraryCard } from "@/components/content-library-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
-import { analyzeCreator, ApiError } from "@/lib/api";
+import { analyzeCreator, analyzeAudience, ApiError } from "@/lib/api";
 
 export default function CreatorDnaPage() {
   const { state, loading, refetch } = useCreatorState();
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [analyzeWarnings, setAnalyzeWarnings] = useState<string[]>([]);
+  const [analyzingAudience, setAnalyzingAudience] = useState(false);
+  const [audienceError, setAudienceError] = useState<string | null>(null);
+  const [audienceWarnings, setAudienceWarnings] = useState<string[]>([]);
 
   async function handleAnalyze() {
     const session = getSession();
@@ -32,6 +36,23 @@ export default function CreatorDnaPage() {
       setAnalyzeError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function handleAnalyzeAudience() {
+    const session = getSession();
+    if (!session) return;
+    setAnalyzingAudience(true);
+    setAudienceError(null);
+    setAudienceWarnings([]);
+    try {
+      const result = await analyzeAudience(session.creatorId);
+      setAudienceWarnings(result.warnings);
+      await refetch();
+    } catch (err) {
+      setAudienceError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setAnalyzingAudience(false);
     }
   }
 
@@ -108,10 +129,23 @@ export default function CreatorDnaPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-accent" /> Audience
-            </CardTitle>
-            <CardDescription>Who you're speaking to.</CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-4 w-4 text-accent" /> Audience
+                </CardTitle>
+                <CardDescription>Who you're speaking to.</CardDescription>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <Button variant="secondary" onClick={handleAnalyzeAudience} disabled={analyzingAudience}>
+                  {analyzingAudience ? "Analyzing…" : state?.audience ? "Re-analyze" : "Analyze audience"}
+                </Button>
+                {audienceError && <p className="max-w-[14rem] text-right text-xs text-bad">{audienceError}</p>}
+                {!audienceError && audienceWarnings.length > 0 && (
+                  <p className="max-w-[14rem] text-right text-xs text-warn">{audienceWarnings.join(" ")}</p>
+                )}
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -125,7 +159,62 @@ export default function CreatorDnaPage() {
               <EmptyState
                 icon={Users}
                 title="Not analyzed yet"
-                description="Audience problems, desires, and objections are built from comments and connected analytics."
+                description="Add audience signals in Research (comments, questions, feedback), then analyze here."
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <HeartHandshake className="h-4 w-4 text-accent" /> Audience segments
+            </CardTitle>
+            <CardDescription>The Audience Problem Graph — recurring problems, desires, and objections.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {state?.audience_segments && state.audience_segments.length > 0 ? (
+              <ul className="space-y-4">
+                {state.audience_segments.map((s) => (
+                  <li key={s.id}>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <p className="text-sm font-medium text-ink">{s.name}</p>
+                      <ConfidenceBadge confidence={s.confidence} />
+                    </div>
+                    <div className="space-y-1.5">
+                      {s.problems && s.problems.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-subtle">Problems:</span>
+                          {s.problems.map((p, i) => (
+                            <Badge key={`${s.id}-problem-${i}`} tone="neutral">{p}</Badge>
+                          ))}
+                        </div>
+                      )}
+                      {s.desires && s.desires.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-subtle">Desires:</span>
+                          {s.desires.map((d, i) => (
+                            <Badge key={`${s.id}-desire-${i}`} tone="accent">{d}</Badge>
+                          ))}
+                        </div>
+                      )}
+                      {s.objections && s.objections.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs text-subtle">Objections:</span>
+                          {s.objections.map((o, i) => (
+                            <Badge key={`${s.id}-objection-${i}`} tone="warn">{o}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={HeartHandshake}
+                title="No segments yet"
+                description="Segments emerge once at least 3 audience signals have been ingested and analyzed."
               />
             )}
           </CardContent>

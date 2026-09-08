@@ -15,6 +15,7 @@ PREFIXES = {
     "voice_profile": "voice",
     "audience_profile": "aud",
     "audience_segment": "seg",
+    "audience_signal": "asig",
     "creator_goal": "goal",
     "creator_preference": "pref",
     "content_pillar": "pillar",

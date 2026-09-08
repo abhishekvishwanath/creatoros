@@ -92,6 +92,7 @@ export interface CreatorStateSnapshot {
   active_goals: CreatorGoalRead[];
   recent_content: RecentContentSummary[];
   content_pillars: ContentPillarSummary[];
+  audience_segments: AudienceSegmentRead[];
   top_performing_content: unknown[];
   recent_failures: unknown[];
   current_research_signals: ResearchSignalSummary[];
@@ -191,3 +192,36 @@ export interface GenerateStrategyResponse {
 }
 
 export type StrategyStatus = "draft" | "active" | "completed";
+
+export interface AudienceSegmentRead {
+  id: string;
+  name: string;
+  problems: string[] | null;
+  desires: string[] | null;
+  objections: string[] | null;
+  questions: string[] | null;
+  fears: string[] | null;
+  aspirations: string[] | null;
+  language: string[] | null;
+  knowledge_level: string | null;
+  confidence: number;
+  sample_size: number | null;
+}
+
+export interface AudienceSignalCreate {
+  text: string;
+  source_platform?: string;
+}
+
+export interface AudienceSignalRead {
+  id: string;
+  text: string;
+  source_platform: string | null;
+  created_at: string;
+}
+
+export interface AnalyzeAudienceResponse {
+  audience: AudienceProfileRead | null;
+  segments: AudienceSegmentRead[];
+  warnings: string[];
+}
