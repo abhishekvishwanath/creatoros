@@ -15,5 +15,12 @@ class BaseAgent(ABC):
     allowed_tools: list[str] = []
 
     @abstractmethod
-    async def run(self, context: CreatorStateSnapshot, model_router: ModelRouter) -> AgentOutput:
+    async def run(
+        self, context: CreatorStateSnapshot, model_router: ModelRouter, **extra_context
+    ) -> AgentOutput:
+        """`extra_context` carries whatever task-specific slice this agent
+        asked the Context Builder for beyond the base snapshot (e.g. actual
+        transcript text for voice analysis) — see
+        app/agent_service/context/builder.py. Agents that don't need anything
+        beyond the base snapshot simply ignore it."""
         raise NotImplementedError

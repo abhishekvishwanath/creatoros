@@ -29,6 +29,7 @@ class Orchestrator:
         creator_id: str,
         workflow_name: str,
         context: CreatorStateSnapshot,
+        **extra_context,
     ) -> AgentOutput:
         run = AgentRun(
             id=generate_id("agent_run"),
@@ -42,7 +43,7 @@ class Orchestrator:
         await self.db.flush()
 
         try:
-            output = await agent.run(context, self.model_router)
+            output = await agent.run(context, self.model_router, **extra_context)
             run.status = "succeeded" if output.status != "failed" else "failed"
             run.state_changes = {
                 "proposed_state_changes": output.proposed_state_changes,

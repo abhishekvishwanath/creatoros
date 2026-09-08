@@ -109,3 +109,14 @@ class CreatorStateSnapshot(BaseModel):
     current_research_signals: list[dict] = Field(default_factory=list)
     active_experiments: list[dict] = Field(default_factory=list)
     strategic_learnings: list[dict] = Field(default_factory=list)
+
+
+class AnalyzeCreatorResponse(BaseModel):
+    """Response for POST /creators/{id}/analyze. Distinct from
+    CreatorStateSnapshot (which represents pure state) because an analyze run
+    can partially fail — e.g. positioning inference fails while voice
+    inference succeeds — and the caller needs to see that instead of it being
+    silently dropped (CLAUDE.md §43: never let a failure look like success)."""
+
+    state: CreatorStateSnapshot
+    warnings: list[str] = Field(default_factory=list)

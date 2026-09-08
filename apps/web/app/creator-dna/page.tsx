@@ -22,14 +22,17 @@ export default function CreatorDnaPage() {
   const { state, loading, refetch } = useCreatorState();
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeWarnings, setAnalyzeWarnings] = useState<string[]>([]);
 
   async function handleAnalyze() {
     const session = getSession();
     if (!session) return;
     setAnalyzing(true);
     setAnalyzeError(null);
+    setAnalyzeWarnings([]);
     try {
-      await analyzeCreator(session.creatorId);
+      const result = await analyzeCreator(session.creatorId);
+      setAnalyzeWarnings(result.warnings);
       await refetch();
     } catch (err) {
       setAnalyzeError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
@@ -50,6 +53,9 @@ export default function CreatorDnaPage() {
               {analyzing ? "Analyzing…" : state?.positioning ? "Re-analyze" : "Build my Creator DNA"}
             </Button>
             {analyzeError && <p className="max-w-xs text-right text-xs text-bad">{analyzeError}</p>}
+            {!analyzeError && analyzeWarnings.length > 0 && (
+              <p className="max-w-xs text-right text-xs text-warn">{analyzeWarnings.join(" ")}</p>
+            )}
           </div>
         }
       />

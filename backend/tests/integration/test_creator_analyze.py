@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.domain.creator.models import Creator, CreatorProfile
+from app.domain.creator.models import Creator, CreatorProfile, VoiceProfile
 from app.infrastructure.db.session import AsyncSessionLocal
 
 
@@ -27,11 +27,11 @@ async def test_analyze_creates_a_versioned_creator_profile(client):
 
     resp = await client.post(f"/creators/{creator_id}/analyze", headers=headers)
     assert resp.status_code == 200
-    body = resp.json()
+    state = resp.json()["state"]
 
-    assert body["positioning"] is not None
-    assert body["positioning"]["positioning_statement"]
-    assert body["positioning"]["confidence"] == 0.3
+    assert state["positioning"] is not None
+    assert state["positioning"]["positioning_statement"]
+    assert state["positioning"]["confidence"] == 0.3
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -93,6 +93,40 @@ async def test_analyze_carries_forward_boundaries_it_did_not_touch(client):
 
     assert new_current.version == 2
     assert new_current.prohibited_topics == ["gambling"]
+
+
+async def test_analyze_without_content_never_proposes_a_voice_profile(client):
+    """No ANTHROPIC_API_KEY is configured, and voice inference has no honest
+    rule-based fallback (unlike positioning) — it should be skipped entirely,
+    not filled in with a guess, when there's no ingested content either."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="henry@example.com", name="Henry")
+    headers = {"X-Debug-User-Id": user_id}
+
+    resp = await client.post(f"/creators/{creator_id}/analyze", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["state"]["voice"] is None
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(VoiceProfile).where(VoiceProfile.creator_id == creator_id))
+        assert result.scalars().first() is None
+
+
+async def test_analyze_with_ingested_content_still_skips_voice_in_stub_mode(client):
+    """Even with content ingested, stub mode (no ANTHROPIC_API_KEY) has no
+    honest way to infer voice, so it must still skip rather than guess —
+    this is the regression the agent's stub branch exists to prevent."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="ivy@example.com", name="Ivy")
+    headers = {"X-Debug-User-Id": user_id}
+
+    await client.post(
+        f"/creators/{creator_id}/content",
+        json={"title": "A post", "transcript": "hook body cta"},
+        headers=headers,
+    )
+
+    resp = await client.post(f"/creators/{creator_id}/analyze", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["state"]["voice"] is None
 
 
 async def test_analyze_enforces_tenant_isolation(client):

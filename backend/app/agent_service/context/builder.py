@@ -89,3 +89,35 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         active_goals=[CreatorGoalRead.model_validate(g) for g in goals],
         recent_content=recent_content,
     )
+
+
+VOICE_ANALYSIS_MAX_ITEMS = 5
+VOICE_ANALYSIS_CHAR_LIMIT = 2000
+
+
+async def build_voice_analysis_transcripts(db: AsyncSession, creator: Creator) -> list[dict]:
+    """Task-specific context slice for voice inference (CLAUDE.md §10): unlike
+    the UI-facing snapshot above, which only carries content *metadata* to
+    stay bounded, the Creator Intelligence Agent's voice-analysis step needs
+    actual transcript text. Kept separate rather than added to
+    CreatorStateSnapshot so the read endpoint never ships full transcript text
+    to the browser on every page load — this is deliberately narrower, pulled
+    only when an agent asks for it.
+
+    Each item keeps its content_item id alongside the (truncated) text so the
+    agent can cite exactly which content it drew a voice trait from
+    (CLAUDE.md §3.4 evidence over vibes) rather than a bare unsourced claim.
+    Still bounded: at most VOICE_ANALYSIS_MAX_ITEMS items, each truncated to
+    VOICE_ANALYSIS_CHAR_LIMIT characters.
+    """
+    result = await db.execute(
+        select(ContentItem)
+        .where(ContentItem.creator_id == creator.id, ContentItem.transcript.isnot(None))
+        .order_by(desc(ContentItem.created_at))
+        .limit(VOICE_ANALYSIS_MAX_ITEMS)
+    )
+    return [
+        {"id": c.id, "title": c.title, "transcript": c.transcript[:VOICE_ANALYSIS_CHAR_LIMIT]}
+        for c in result.scalars().all()
+        if c.transcript
+    ]

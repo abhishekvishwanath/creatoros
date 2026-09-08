@@ -97,9 +97,18 @@ class CreatorProfile(Base, TimestampMixin, CreatorScopedMixin):
 
 
 class VoiceProfile(Base, TimestampMixin, CreatorScopedMixin):
-    """CLAUDE.md 7.3 brand and voice. Versioned."""
+    """CLAUDE.md 7.3 brand and voice. Versioned. See CreatorProfile's
+    docstring above for why is_current is uniquely constrained per creator."""
 
     __tablename__ = "voice_profiles"
+    __table_args__ = (
+        Index(
+            "ux_voice_profiles_current",
+            "creator_id",
+            unique=True,
+            postgresql_where=text("is_current"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("voice_profile"))
     version: Mapped[int] = mapped_column(Integer, default=1)

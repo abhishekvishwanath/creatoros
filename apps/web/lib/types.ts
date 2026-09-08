@@ -85,6 +85,11 @@ export interface CreatorStateSnapshot {
   strategic_learnings: unknown[];
 }
 
+export interface AnalyzeCreatorResponse {
+  state: CreatorStateSnapshot;
+  warnings: string[];
+}
+
 export interface ContentItemCreate {
   title: string;
   platform?: string;
