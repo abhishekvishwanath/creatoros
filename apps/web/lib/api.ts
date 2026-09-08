@@ -1,4 +1,4 @@
-import type { CreatorCreateResponse, CreatorRead, CreatorStateSnapshot } from "./types";
+import type { ContentItemCreate, CreatorCreateResponse, CreatorRead, CreatorStateSnapshot } from "./types";
 import { getSession } from "./session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -56,4 +56,11 @@ export function getCreatorState(creatorId: string) {
 
 export function analyzeCreator(creatorId: string) {
   return request<CreatorStateSnapshot>(`/creators/${creatorId}/analyze`, { method: "POST" });
+}
+
+export function ingestContent(creatorId: string, payload: ContentItemCreate) {
+  return request(`/creators/${creatorId}/content`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

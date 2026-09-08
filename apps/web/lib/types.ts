@@ -62,16 +62,33 @@ export interface CreatorGoalRead {
   status: string;
 }
 
+export interface RecentContentSummary {
+  id: string;
+  title: string | null;
+  platform: string | null;
+  format: string | null;
+  topic: string | null;
+  has_transcript: boolean;
+}
+
 export interface CreatorStateSnapshot {
   creator: CreatorRead;
   positioning: CreatorProfileRead | null;
   voice: VoiceProfileRead | null;
   audience: AudienceProfileRead | null;
   active_goals: CreatorGoalRead[];
-  recent_content: unknown[];
+  recent_content: RecentContentSummary[];
   top_performing_content: unknown[];
   recent_failures: unknown[];
   current_research_signals: unknown[];
   active_experiments: unknown[];
   strategic_learnings: unknown[];
+}
+
+export interface ContentItemCreate {
+  title: string;
+  platform?: string;
+  format?: string;
+  topic?: string;
+  transcript?: string;
 }

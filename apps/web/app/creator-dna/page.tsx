@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ContentLibraryCard } from "@/components/content-library-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
 import { analyzeCreator, ApiError } from "@/lib/api";
@@ -53,6 +54,8 @@ export default function CreatorDnaPage() {
         }
       />
       <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-2">
+        <ContentLibraryCard recentContent={state?.recent_content ?? []} onIngested={refetch} />
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

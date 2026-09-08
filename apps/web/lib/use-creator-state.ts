@@ -17,16 +17,18 @@ export function useCreatorState() {
   const [state, setState] = useState<CreatorStateSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refetch = useCallback(() => {
+  const refetch = useCallback(async () => {
     const session = getSession();
     if (!session) {
       setLoading(false);
       return;
     }
     setLoading(true);
-    return getCreatorState(session.creatorId)
-      .then(setState)
-      .finally(() => setLoading(false));
+    try {
+      setState(await getCreatorState(session.creatorId));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
