@@ -4,6 +4,11 @@ import type {
   CreatorCreateResponse,
   CreatorRead,
   CreatorStateSnapshot,
+  GenerateOpportunitiesResponse,
+  OpportunityRead,
+  OpportunityStatus,
+  ResearchSignalCreate,
+  ResearchSignalRead,
 } from "./types";
 import { getSession } from "./session";
 
@@ -68,5 +73,33 @@ export function ingestContent(creatorId: string, payload: ContentItemCreate) {
   return request(`/creators/${creatorId}/content`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function createResearchSignal(creatorId: string, payload: ResearchSignalCreate) {
+  return request<ResearchSignalRead>(`/creators/${creatorId}/research-signals`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listResearchSignals(creatorId: string) {
+  return request<ResearchSignalRead[]>(`/creators/${creatorId}/research-signals`);
+}
+
+export function generateOpportunities(creatorId: string) {
+  return request<GenerateOpportunitiesResponse>(`/creators/${creatorId}/opportunities/generate`, {
+    method: "POST",
+  });
+}
+
+export function listOpportunities(creatorId: string) {
+  return request<OpportunityRead[]>(`/creators/${creatorId}/opportunities`);
+}
+
+export function updateOpportunityStatus(creatorId: string, opportunityId: string, status: OpportunityStatus) {
+  return request<OpportunityRead>(`/creators/${creatorId}/opportunities/${opportunityId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
 }

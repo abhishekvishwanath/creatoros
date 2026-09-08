@@ -4,19 +4,13 @@ import { useState } from "react";
 import { Dna, Mic, Users, Target, Shield, Sparkles } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { ContentLibraryCard } from "@/components/content-library-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
 import { analyzeCreator, ApiError } from "@/lib/api";
-
-function ConfidenceBadge({ confidence }: { confidence: number }) {
-  if (confidence >= 0.75) return <Badge tone="good">high confidence</Badge>;
-  if (confidence >= 0.4) return <Badge tone="warn">medium confidence</Badge>;
-  return <Badge tone="neutral">low confidence</Badge>;
-}
 
 export default function CreatorDnaPage() {
   const { state, loading, refetch } = useCreatorState();

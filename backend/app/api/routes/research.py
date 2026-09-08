@@ -1,0 +1,39 @@
+"""Research signal ingestion (CLAUDE.md §17, §33 Phase 3).
+
+Manual entry only for now — no platform/search API is connected yet (see
+README). A creator or their team pastes in what they observed elsewhere: a
+competitor post that took off, a trend, a recurring audience question. This
+is the raw material the Opportunity Engine Agent scores against.
+"""
+
+from fastapi import APIRouter, Depends, Query
+
+from app.api.deps import DbSession, get_owned_creator
+from app.domain.creator.models import Creator
+from app.domain.research.service import ingest_research_signal, list_research_signals
+from app.schemas.research import ResearchSignalCreate, ResearchSignalRead
+
+router = APIRouter(prefix="/creators/{creator_id}/research-signals", tags=["research"])
+
+
+@router.post("", response_model=ResearchSignalRead, status_code=201)
+async def create_research_signal(
+    payload: ResearchSignalCreate,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> ResearchSignalRead:
+    signal = await ingest_research_signal(db, creator_id=creator.id, data=payload.model_dump())
+    await db.commit()
+    await db.refresh(signal)
+    return ResearchSignalRead.model_validate(signal)
+
+
+@router.get("", response_model=list[ResearchSignalRead])
+async def get_research_signals(
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> list[ResearchSignalRead]:
+    signals = await list_research_signals(db, creator_id=creator.id, limit=limit, offset=offset)
+    return [ResearchSignalRead.model_validate(s) for s in signals]

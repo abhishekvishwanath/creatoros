@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import generate_id
 from app.infrastructure.db.base import Base, CreatorScopedMixin, TimestampMixin
@@ -91,6 +91,10 @@ class Opportunity(Base, TimestampMixin, CreatorScopedMixin):
     # pending | approved | rejected | saved_for_later | used
     status: Mapped[str] = mapped_column(String, default="pending")
 
+    evidence: Mapped[list["OpportunityEvidence"]] = relationship(
+        back_populates="opportunity", cascade="all, delete-orphan"
+    )
+
 
 class OpportunityEvidence(Base, TimestampMixin):
     """Links an opportunity to the concrete evidence that produced it, so the UI
@@ -109,3 +113,5 @@ class OpportunityEvidence(Base, TimestampMixin):
         String, ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True
     )
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    opportunity: Mapped["Opportunity"] = relationship(back_populates="evidence")

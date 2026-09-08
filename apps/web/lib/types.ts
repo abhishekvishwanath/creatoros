@@ -77,6 +77,13 @@ export interface ContentPillarSummary {
   description: string | null;
 }
 
+export interface ResearchSignalSummary {
+  id: string;
+  topic: string | null;
+  subtopic: string | null;
+  format: string | null;
+}
+
 export interface CreatorStateSnapshot {
   creator: CreatorRead;
   positioning: CreatorProfileRead | null;
@@ -87,7 +94,7 @@ export interface CreatorStateSnapshot {
   content_pillars: ContentPillarSummary[];
   top_performing_content: unknown[];
   recent_failures: unknown[];
-  current_research_signals: unknown[];
+  current_research_signals: ResearchSignalSummary[];
   active_experiments: unknown[];
   strategic_learnings: unknown[];
 }
@@ -104,3 +111,56 @@ export interface ContentItemCreate {
   topic?: string;
   transcript?: string;
 }
+
+export interface ResearchSignalCreate {
+  topic: string;
+  subtopic?: string;
+  format?: string;
+  summary: string;
+  platform?: string;
+  source_url?: string;
+  source_title?: string;
+}
+
+export interface ResearchSignalRead {
+  id: string;
+  topic: string | null;
+  subtopic: string | null;
+  format: string | null;
+  content_features: { summary?: string } | null;
+  evidence_quality: string | null;
+  source_id: string | null;
+  created_at: string;
+}
+
+export interface OpportunityEvidenceRead {
+  research_signal_id: string | null;
+  content_item_id: string | null;
+  note: string | null;
+}
+
+export interface OpportunityRead {
+  id: string;
+  topic: string | null;
+  subtopic: string | null;
+  angle: string | null;
+  format: string | null;
+  content_pillar_id: string | null;
+  score: number | null;
+  score_components: Record<string, number> | null;
+  competition_level: string | null;
+  saturation_estimate: string | null;
+  production_complexity: string | null;
+  recommended_time_window: string | null;
+  confidence: number | null;
+  status: "pending" | "approved" | "rejected" | "saved_for_later" | "used";
+  created_at: string;
+  evidence: OpportunityEvidenceRead[];
+}
+
+export interface GenerateOpportunitiesResponse {
+  opportunities: OpportunityRead[];
+  warnings: string[];
+}
+
+export type OpportunityStatus = "approved" | "rejected" | "saved_for_later" | "used";

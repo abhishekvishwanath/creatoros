@@ -22,6 +22,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.research.models import ResearchSignal, ResearchSource
 from app.schemas.creator import (
     AudienceProfileRead,
     CreatorGoalRead,
@@ -86,6 +87,20 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         {"id": p.id, "name": p.name, "description": p.description} for p in pillars_result.scalars().all()
     ]
 
+    # Bounded like recent_content above — metadata only (no summary text) so
+    # the UI-facing snapshot stays small; the Opportunity Engine agent pulls
+    # full signal text separately via build_research_signals_context.
+    signals_result = await db.execute(
+        select(ResearchSignal)
+        .where(ResearchSignal.creator_id == creator.id)
+        .order_by(desc(ResearchSignal.created_at))
+        .limit(10)
+    )
+    current_research_signals = [
+        {"id": s.id, "topic": s.topic, "subtopic": s.subtopic, "format": s.format}
+        for s in signals_result.scalars().all()
+    ]
+
     return CreatorStateSnapshot(
         creator=CreatorRead.model_validate(creator),
         positioning=CreatorProfileRead.model_validate(profile) if profile else None,
@@ -94,6 +109,7 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         active_goals=[CreatorGoalRead.model_validate(g) for g in goals],
         recent_content=recent_content,
         content_pillars=content_pillars,
+        current_research_signals=current_research_signals,
     )
 
 
@@ -128,3 +144,35 @@ async def build_voice_analysis_transcripts(db: AsyncSession, creator: Creator) -
         for c in result.scalars().all()
         if c.transcript
     ]
+
+
+RESEARCH_SIGNALS_CONTEXT_MAX_ITEMS = 20
+
+
+async def build_research_signals_context(db: AsyncSession, creator: Creator) -> list[dict]:
+    """Task-specific context slice for the Opportunity Engine Agent: unlike
+    the UI-facing snapshot's current_research_signals (metadata only), this
+    carries the actual observation text (`summary`) the agent reasons over,
+    plus platform so it can cite where a signal came from. Bounded to the
+    most recent RESEARCH_SIGNALS_CONTEXT_MAX_ITEMS (CLAUDE.md §10)."""
+    result = await db.execute(
+        select(ResearchSignal, ResearchSource)
+        .join(ResearchSource, ResearchSignal.source_id == ResearchSource.id, isouter=True)
+        .where(ResearchSignal.creator_id == creator.id)
+        .order_by(desc(ResearchSignal.created_at))
+        .limit(RESEARCH_SIGNALS_CONTEXT_MAX_ITEMS)
+    )
+    signals = []
+    for signal, source in result.all():
+        summary = (signal.content_features or {}).get("summary", "")
+        signals.append(
+            {
+                "id": signal.id,
+                "topic": signal.topic,
+                "subtopic": signal.subtopic,
+                "format": signal.format,
+                "platform": source.platform if source else None,
+                "summary": summary,
+            }
+        )
+    return signals
