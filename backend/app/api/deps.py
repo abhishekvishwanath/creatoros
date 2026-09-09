@@ -1,6 +1,7 @@
 from typing import Annotated, Optional
 
 from fastapi import Depends, Header, HTTPException, status
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,3 +44,20 @@ async def get_owned_creator(
     if creator is None or creator.user_id != user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Creator not found")
     return creator
+
+
+def validate_or_502(model_cls: type[BaseModel], obj: object, *, label: str) -> BaseModel:
+    """Shared across every route that turns a freshly-applied agent proposal
+    into a response schema (content briefs/scripts, performance diagnoses,
+    ...). Agents only guarantee their JSON has the one required key
+    `_parse_json` looks for (CLAUDE.md §40 output contracts are enforced at
+    the model layer, not guaranteed by the LLM) — a field with the wrong
+    shape (e.g. a list field returned as a string) would otherwise reach
+    `.model_validate()` straight from a freshly-applied DB write and crash
+    the request with a raw 500. Surfacing it as a 502 keeps this on the same
+    "agent produced something unusable" path as a parse failure, instead of
+    an unhandled exception."""
+    try:
+        return model_cls.model_validate(obj)
+    except ValidationError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"{label} produced an unexpected shape: {exc}") from exc

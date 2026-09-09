@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PenSquare, Sparkles, ArrowLeft, Lightbulb } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -20,9 +21,33 @@ import {
   markContentEditing,
   scheduleContent,
   publishContent,
+  ingestPerformance,
+  listPerformance,
+  diagnosePerformance,
   ApiError,
 } from "@/lib/api";
-import type { CalendarEventRead, ContentDetailRead, ContentItemRead, OpportunityRead } from "@/lib/types";
+import type {
+  CalendarEventRead,
+  ContentDetailRead,
+  ContentItemRead,
+  DiagnosisRead,
+  OpportunityRead,
+  PerformanceSnapshotCreate,
+  PerformanceSnapshotRead,
+} from "@/lib/types";
+
+const METRIC_FIELDS: { key: keyof PerformanceSnapshotCreate; label: string }[] = [
+  { key: "views", label: "Views" },
+  { key: "likes", label: "Likes" },
+  { key: "comments", label: "Comments" },
+  { key: "shares", label: "Shares" },
+  { key: "saves", label: "Saves" },
+  { key: "retention", label: "Retention %" },
+  { key: "watch_time", label: "Watch time (min)" },
+  { key: "avg_view_duration", label: "Avg view dur. (sec)" },
+  { key: "followers_gained", label: "Followers gained" },
+  { key: "profile_visits", label: "Profile visits" },
+];
 
 const IN_PROGRESS_STATUSES = new Set([
   "APPROVED",
@@ -52,16 +77,33 @@ function severityTone(severity: string): "good" | "warn" | "bad" {
 }
 
 export default function CreatePage() {
+  return (
+    <Suspense
+      fallback={
+        <div>
+          <PageHeader title="Create" description="Angle → hook → brief → script → critique → improved script." />
+          <div className="p-8 text-sm text-subtle">Loading…</div>
+        </div>
+      }
+    >
+      <CreatePageInner />
+    </Suspense>
+  );
+}
+
+function CreatePageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [opportunities, setOpportunities] = useState<OpportunityRead[]>([]);
   const [contentItems, setContentItems] = useState<ContentItemRead[]>([]);
   const [loadingList, setLoadingList] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("item"));
   const [detail, setDetail] = useState<ContentDetailRead | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [starting, setStarting] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"brief" | "script" | "review" | "recorded" | "editing" | "schedule" | "publish" | null>(
-    null
-  );
+  const [busy, setBusy] = useState<
+    "brief" | "script" | "review" | "recorded" | "editing" | "schedule" | "publish" | "metrics" | "diagnose" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [scheduledAt, setScheduledAt] = useState("");
@@ -69,6 +111,9 @@ export default function CreatePage() {
   const [scheduleInfo, setScheduleInfo] = useState<CalendarEventRead | null>(null);
   const [publishUrl, setPublishUrl] = useState("");
   const [publishInfo, setPublishInfo] = useState<{ url: string | null; published_at: string } | null>(null);
+  const [metricsForm, setMetricsForm] = useState<Record<string, string>>({});
+  const [latestSnapshot, setLatestSnapshot] = useState<PerformanceSnapshotRead | null>(null);
+  const [diagnosis, setDiagnosis] = useState<DiagnosisRead | null>(null);
 
   const refetchLists = useCallback(async () => {
     const session = getSession();
@@ -108,6 +153,26 @@ export default function CreatePage() {
     if (selectedId) refetchDetail(selectedId);
   }, [selectedId, refetchDetail]);
 
+  const publishedItemId = detail?.item?.status === "PUBLISHED" ? selectedId : null;
+  useEffect(() => {
+    // Guards against a slower response for a previously-selected item
+    // resolving after a faster response for the newly-selected one and
+    // overwriting it with the wrong item's data (mirrors selectItem's own
+    // "stale state must never leak into an unrelated item" rule above).
+    let cancelled = false;
+    async function loadPerformance() {
+      const session = getSession();
+      if (!session || !publishedItemId) return;
+      const snapshots = await listPerformance(session.creatorId, publishedItemId);
+      if (cancelled) return;
+      setLatestSnapshot(snapshots.length > 0 ? snapshots[snapshots.length - 1] : null);
+    }
+    loadPerformance();
+    return () => {
+      cancelled = true;
+    };
+  }, [publishedItemId]);
+
   // A stale error/warning from one item or view must never leak into an
   // unrelated one — navigating always clears them, and every action clears
   // them again before it starts.
@@ -121,7 +186,23 @@ export default function CreatePage() {
     setScheduleInfo(null);
     setPublishUrl("");
     setPublishInfo(null);
+    setMetricsForm({});
+    setLatestSnapshot(null);
+    setDiagnosis(null);
+    router.replace(id ? `/create?item=${id}` : "/create");
   }
+
+  // `selectedId` only reads the `item` query param once, at mount
+  // (useState initializer) — Next.js App Router reuses this component
+  // instance across query-string-only navigations on the same /create
+  // route (e.g. clicking a different Analytics row), so without this the
+  // page would keep showing whichever item was selected first. This stays
+  // a no-op loop-free with selectItem's router.replace above: once synced,
+  // paramItem === selectedId and the effect doesn't fire again.
+  const paramItem = searchParams.get("item");
+  useEffect(() => {
+    if (paramItem !== selectedId) selectItem(paramItem);
+  }, [paramItem]);
 
   async function handleStart(opportunityId: string) {
     const session = getSession();
@@ -248,6 +329,45 @@ export default function CreatePage() {
       const result = await publishContent(session.creatorId, selectedId, { url: publishUrl || undefined });
       setPublishInfo({ url: result.url, published_at: result.published_at });
       await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSaveMetrics() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    setBusy("metrics");
+    setError(null);
+    try {
+      const payload: Record<string, number> = {};
+      for (const { key } of METRIC_FIELDS) {
+        const raw = metricsForm[key];
+        if (raw !== undefined && raw !== "") payload[key] = Number(raw);
+      }
+      const snapshot = await ingestPerformance(session.creatorId, selectedId, payload as PerformanceSnapshotCreate);
+      setLatestSnapshot(snapshot);
+      setDiagnosis(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDiagnose() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    setBusy("diagnose");
+    setError(null);
+    setWarnings([]);
+    try {
+      const result = await diagnosePerformance(session.creatorId, selectedId);
+      setLatestSnapshot(result.snapshot);
+      setDiagnosis(result.diagnosis);
+      setWarnings(result.warnings);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
     } finally {
@@ -482,6 +602,83 @@ export default function CreatePage() {
                       </>
                     )}
                   </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {item && item.status === "PUBLISHED" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Performance</CardTitle>
+                <CardDescription>Log what happened, then see it against your own baseline (CLAUDE.md §27-29).</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  {METRIC_FIELDS.map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="block text-xs text-subtle" htmlFor={`metric-${key}`}>
+                        {label}
+                      </label>
+                      <input
+                        id={`metric-${key}`}
+                        type="number"
+                        value={metricsForm[key] ?? ""}
+                        onChange={(e) => setMetricsForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <Button variant="secondary" onClick={handleSaveMetrics} disabled={busy !== null}>
+                  {busy === "metrics" ? "Saving…" : "Save metrics"}
+                </Button>
+
+                {latestSnapshot && (
+                  <div className="rounded-lg border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-medium text-subtle">
+                        Latest: {new Date(latestSnapshot.captured_at).toLocaleString()}
+                      </p>
+                      <Button onClick={handleDiagnose} disabled={busy !== null}>
+                        <Sparkles className="h-4 w-4" />
+                        {busy === "diagnose" ? "Diagnosing…" : "Diagnose"}
+                      </Button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
+                      {latestSnapshot.views !== null && <span>{latestSnapshot.views.toLocaleString()} views</span>}
+                      {latestSnapshot.likes !== null && <span>{latestSnapshot.likes.toLocaleString()} likes</span>}
+                      {latestSnapshot.comments !== null && (
+                        <span>{latestSnapshot.comments.toLocaleString()} comments</span>
+                      )}
+                      {latestSnapshot.shares !== null && <span>{latestSnapshot.shares.toLocaleString()} shares</span>}
+                      {latestSnapshot.saves !== null && <span>{latestSnapshot.saves.toLocaleString()} saves</span>}
+                      {latestSnapshot.retention !== null && <span>{latestSnapshot.retention}% retention</span>}
+                    </div>
+                  </div>
+                )}
+
+                {diagnosis && (
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    <p className="text-sm text-ink">{diagnosis.summary}</p>
+                    {diagnosis.associated_factors.length > 0 && (
+                      <ul className="space-y-1.5">
+                        {diagnosis.associated_factors.map((f, i) => (
+                          <li key={i} className="flex items-start gap-2 text-sm">
+                            <Badge tone="neutral">{f.confidence}</Badge>
+                            <span className="text-subtle">
+                              <span className="text-ink">{f.factor}:</span> {f.note}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {diagnosis.next_test && (
+                      <p className="text-xs text-subtle">
+                        <span className="font-medium text-ink">Next test:</span> {diagnosis.next_test}
+                      </p>
+                    )}
+                  </div>
                 )}
               </CardContent>
             </Card>

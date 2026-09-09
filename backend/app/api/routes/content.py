@@ -12,7 +12,6 @@ is meant to be inspected before the next one runs.
 from sqlalchemy import desc, select
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ValidationError
 
 from app.agent_service.agents.content_architect import ContentArchitectAgent
 from app.agent_service.agents.editorial_critic import EditorialCriticAgent
@@ -20,7 +19,7 @@ from app.agent_service.agents.script_agent import ScriptAgent
 from app.agent_service.context.builder import build_content_brief_context, build_creator_state_snapshot
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
-from app.api.deps import DbSession, get_owned_creator
+from app.api.deps import DbSession, get_owned_creator, validate_or_502
 from app.core.ids import generate_id
 from app.domain.content.models import ContentItem
 from app.domain.content.service import (
@@ -58,23 +57,6 @@ from app.schemas.content import (
 )
 
 router = APIRouter(prefix="/creators/{creator_id}/content", tags=["content"])
-
-
-def _validate_or_502(model_cls: type[BaseModel], obj: object, *, label: str) -> BaseModel:
-    """The brief/script agents only check that their JSON has the one
-    required key `_parse_json` looks for (CLAUDE.md §40 output contracts
-    are enforced at the model layer, not guaranteed by the LLM) — a field
-    with the wrong shape (e.g. `key_points` returned as a string instead of
-    a list) would otherwise reach these `.model_validate()` calls straight
-    from a freshly-applied DB write and crash the request with a raw 500.
-    Surfacing it as a 502 keeps this on the same "agent produced something
-    unusable" path as a parse failure, instead of an unhandled exception."""
-    try:
-        return model_cls.model_validate(obj)
-    except ValidationError as exc:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"{label} produced an unexpected shape: {exc}"
-        ) from exc
 
 
 @router.post("", response_model=ContentItemRead, status_code=201)
@@ -194,7 +176,7 @@ async def generate_brief(
                 data=change["data"],
                 evidence_ids=change.get("evidence_ids", []),
             )
-            brief_read = _validate_or_502(ContentBriefRead, brief, label="Content Architect")
+            brief_read = validate_or_502(ContentBriefRead, brief, label="Content Architect")
 
     await db.commit()
     return GenerateBriefResponse(brief=brief_read, warnings=output.warnings)
@@ -243,7 +225,7 @@ async def generate_script(
                 body=change["data"]["body"],
                 hook_variants=change["data"].get("hook_variants", []),
             )
-            script_read = _validate_or_502(ScriptRead, script, label="Script Agent")
+            script_read = validate_or_502(ScriptRead, script, label="Script Agent")
 
     await db.commit()
     return GenerateScriptResponse(script=script_read, warnings=output.warnings)
@@ -324,11 +306,11 @@ async def review_script(
                             hook_variants=rewrite_change["data"].get("hook_variants", []),
                             status="rewritten",
                         )
-                        rewrite_read = _validate_or_502(ScriptRead, rewrite, label="Script Agent (rewrite)")
+                        rewrite_read = validate_or_502(ScriptRead, rewrite, label="Script Agent (rewrite)")
 
     await db.commit()
     return ReviewScriptResponse(
-        reviewed=_validate_or_502(ScriptRead, script, label="Editorial Critic"),
+        reviewed=validate_or_502(ScriptRead, script, label="Editorial Critic"),
         rewrite=rewrite_read,
         warnings=warnings,
     )

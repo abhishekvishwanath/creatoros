@@ -12,12 +12,16 @@ import type {
   CreatorCreateResponse,
   CreatorRead,
   CreatorStateSnapshot,
+  DiagnoseResponse,
   GenerateBriefResponse,
   GenerateOpportunitiesResponse,
   GenerateScriptResponse,
   GenerateStrategyResponse,
   OpportunityRead,
   OpportunityStatus,
+  PerformanceOverviewItem,
+  PerformanceSnapshotCreate,
+  PerformanceSnapshotRead,
   PublishContentRequest,
   PublishContentResponse,
   ResearchSignalCreate,
@@ -229,4 +233,25 @@ export function setCapacity(creatorId: string, itemsPerWeek: number) {
     method: "PUT",
     body: JSON.stringify({ items_per_week: itemsPerWeek }),
   });
+}
+
+export function ingestPerformance(creatorId: string, contentItemId: string, payload: PerformanceSnapshotCreate) {
+  return request<PerformanceSnapshotRead>(`/creators/${creatorId}/content/${contentItemId}/performance`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listPerformance(creatorId: string, contentItemId: string) {
+  return request<PerformanceSnapshotRead[]>(`/creators/${creatorId}/content/${contentItemId}/performance`);
+}
+
+export function diagnosePerformance(creatorId: string, contentItemId: string) {
+  return request<DiagnoseResponse>(`/creators/${creatorId}/content/${contentItemId}/performance/diagnose`, {
+    method: "POST",
+  });
+}
+
+export function getPerformanceOverview(creatorId: string) {
+  return request<PerformanceOverviewItem[]>(`/creators/${creatorId}/performance/overview`);
 }

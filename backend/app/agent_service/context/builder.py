@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.content.models import ContentItem, ContentPillar
+from app.domain.content.service import get_content_brief
 from app.domain.creator.models import (
     AudienceProfile,
     AudienceSegment,
@@ -25,6 +26,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
 from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
 from app.domain.strategy.service import list_available_opportunities
 from app.schemas.creator import (
@@ -224,6 +226,13 @@ async def build_available_opportunities_context(db: AsyncSession, creator: Creat
     ]
 
 
+async def _resolve_pillar_name(db: AsyncSession, content_item: ContentItem) -> str | None:
+    if not content_item.pillar_id:
+        return None
+    pillar = await db.get(ContentPillar, content_item.pillar_id)
+    return pillar.name if pillar else None
+
+
 async def build_content_brief_context(db: AsyncSession, content_item: ContentItem) -> dict:
     """Task-specific context slice for the Content Architect Agent: the
     opportunity a content item was derived from (for its angle — not stored
@@ -249,11 +258,6 @@ async def build_content_brief_context(db: AsyncSession, content_item: ContentIte
                         {"id": s.id, "topic": s.topic, "summary": (s.content_features or {}).get("summary", "")}
                     )
 
-    pillar_name = None
-    if content_item.pillar_id:
-        pillar = await db.get(ContentPillar, content_item.pillar_id)
-        pillar_name = pillar.name if pillar else None
-
     return {
         "content_item": {
             "id": content_item.id,
@@ -262,6 +266,29 @@ async def build_content_brief_context(db: AsyncSession, content_item: ContentIte
             "title": content_item.title,
         },
         "opportunity": {"angle": opportunity.angle, "subtopic": opportunity.subtopic} if opportunity else None,
-        "pillar_name": pillar_name,
+        "pillar_name": await _resolve_pillar_name(db, content_item),
         "evidence_signals": evidence_signals,
+    }
+
+
+async def build_performance_context(db: AsyncSession, content_item: ContentItem) -> dict:
+    """Task-specific context slice for the Performance Intelligence Agent:
+    the piece's latest metrics, its brief (angle/hook — for the "what's
+    associated" reasoning), its pillar, and its ratios against the
+    creator's own baseline. Ratios are computed here in code
+    (app/domain/performance/service.py::compute_ratios), not by the model
+    (CLAUDE.md §20)."""
+    brief = await get_content_brief(db, content_item_id=content_item.id)
+    pillar_name = await _resolve_pillar_name(db, content_item)
+    snapshot = await get_latest_snapshot(db, content_item_id=content_item.id)
+    baselines = await compute_creator_baselines(db, creator_id=content_item.creator_id, content_item=content_item)
+    ratios = compute_ratios(snapshot, baselines) if snapshot else {}
+
+    return {
+        "content_item": {"id": content_item.id, "topic": content_item.topic, "format": content_item.format},
+        "brief": {"angle": brief.angle, "hook_type": brief.hook_type, "hook": brief.hook} if brief else None,
+        "pillar_name": pillar_name,
+        "snapshot": snapshot,
+        "baselines": baselines,
+        "ratios": ratios,
     }

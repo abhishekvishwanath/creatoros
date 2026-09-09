@@ -343,3 +343,62 @@ export interface BottleneckRead {
 export interface CapacityRead {
   items_per_week: number | null;
 }
+
+export interface PerformanceSnapshotCreate {
+  views?: number;
+  watch_time?: number;
+  avg_view_duration?: number;
+  retention?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  saves?: number;
+  followers_gained?: number;
+  profile_visits?: number;
+  captured_at?: string;
+}
+
+export interface PerformanceSnapshotRead {
+  id: string;
+  content_item_id: string;
+  views: number | null;
+  watch_time: number | null;
+  avg_view_duration: number | null;
+  retention: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  followers_gained: number | null;
+  profile_visits: number | null;
+  baseline_comparison: Record<string, unknown> | null;
+  captured_at: string;
+}
+
+export interface AssociatedFactor {
+  factor: string;
+  confidence: string;
+  note: string;
+}
+
+export interface DiagnosisRead {
+  summary: string;
+  associated_factors: AssociatedFactor[];
+  next_test: string | null;
+  confidence: string;
+}
+
+export interface DiagnoseResponse {
+  snapshot: PerformanceSnapshotRead;
+  diagnosis: DiagnosisRead | null;
+  warnings: string[];
+}
+
+export interface PerformanceOverviewItem {
+  content_item_id: string;
+  title: string | null;
+  topic: string | null;
+  format: string | null;
+  platform: string | null;
+  latest_snapshot: PerformanceSnapshotRead | null;
+}
