@@ -3,6 +3,9 @@ import type {
   AnalyzeCreatorResponse,
   AudienceSignalCreate,
   AudienceSignalRead,
+  BottleneckRead,
+  CalendarEventRead,
+  CapacityRead,
   ContentDetailRead,
   ContentItemCreate,
   ContentItemRead,
@@ -15,9 +18,13 @@ import type {
   GenerateStrategyResponse,
   OpportunityRead,
   OpportunityStatus,
+  PublishContentRequest,
+  PublishContentResponse,
   ResearchSignalCreate,
   ResearchSignalRead,
   ReviewScriptResponse,
+  ScheduleContentRequest,
+  ScheduleContentResponse,
   StrategyRead,
   StrategyStatus,
 } from "./types";
@@ -177,4 +184,49 @@ export function listAudienceSignals(creatorId: string) {
 
 export function analyzeAudience(creatorId: string) {
   return request<AnalyzeAudienceResponse>(`/creators/${creatorId}/audience/analyze`, { method: "POST" });
+}
+
+export function markContentRecorded(creatorId: string, contentItemId: string) {
+  return request<ContentItemRead>(`/creators/${creatorId}/content/${contentItemId}/mark-recorded`, {
+    method: "POST",
+  });
+}
+
+export function markContentEditing(creatorId: string, contentItemId: string) {
+  return request<ContentItemRead>(`/creators/${creatorId}/content/${contentItemId}/mark-editing`, {
+    method: "POST",
+  });
+}
+
+export function scheduleContent(creatorId: string, contentItemId: string, payload: ScheduleContentRequest) {
+  return request<ScheduleContentResponse>(`/creators/${creatorId}/content/${contentItemId}/schedule`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function publishContent(creatorId: string, contentItemId: string, payload: PublishContentRequest) {
+  return request<PublishContentResponse>(`/creators/${creatorId}/content/${contentItemId}/publish`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listCalendarEvents(creatorId: string) {
+  return request<CalendarEventRead[]>(`/creators/${creatorId}/calendar`);
+}
+
+export function listBottlenecks(creatorId: string) {
+  return request<BottleneckRead[]>(`/creators/${creatorId}/calendar/bottlenecks`);
+}
+
+export function getCapacity(creatorId: string) {
+  return request<CapacityRead>(`/creators/${creatorId}/capacity`);
+}
+
+export function setCapacity(creatorId: string, itemsPerWeek: number) {
+  return request<CapacityRead>(`/creators/${creatorId}/capacity`, {
+    method: "PUT",
+    body: JSON.stringify({ items_per_week: itemsPerWeek }),
+  });
 }

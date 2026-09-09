@@ -14,9 +14,17 @@ from app.domain.creator.models import (
     AudienceProfile,
     AudienceSegment,
     AudienceSignal,
+    CreatorPreference,
     CreatorProfile,
     VoiceProfile,
 )
+
+# CLAUDE.md §5.2 lists "Operational Capacity" as its own creator state
+# domain, and §26 says capacity should be part of planning. It's stored as
+# an explicit CreatorPreference (CLAUDE.md §33 Phase 5 / §219's own
+# docstring: "explicit + inferred preferences") rather than a new table,
+# since it's a single creator-set number with no versioning need.
+WEEKLY_CAPACITY_KEY = "weekly_content_capacity"
 
 VersionedProfile = TypeVar("VersionedProfile", CreatorProfile, VoiceProfile, AudienceProfile)
 
@@ -283,3 +291,36 @@ async def list_audience_signals(
         .offset(offset)
     )
     return list(result.scalars().all())
+
+
+async def _get_capacity_preference(db: AsyncSession, *, creator_id: str) -> Optional[CreatorPreference]:
+    result = await db.execute(
+        select(CreatorPreference).where(
+            CreatorPreference.creator_id == creator_id, CreatorPreference.key == WEEKLY_CAPACITY_KEY
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_weekly_capacity(db: AsyncSession, *, creator_id: str) -> Optional[int]:
+    pref = await _get_capacity_preference(db, creator_id=creator_id)
+    if pref is None or not pref.value:
+        return None
+    return pref.value.get("items_per_week")
+
+
+async def set_weekly_capacity(db: AsyncSession, *, creator_id: str, items_per_week: int) -> CreatorPreference:
+    pref = await _get_capacity_preference(db, creator_id=creator_id)
+    if pref is None:
+        pref = CreatorPreference(
+            id=generate_id("creator_preference"),
+            creator_id=creator_id,
+            key=WEEKLY_CAPACITY_KEY,
+            value={"items_per_week": items_per_week},
+            source="explicit",
+        )
+        db.add(pref)
+    else:
+        pref.value = {"items_per_week": items_per_week}
+    await db.flush()
+    return pref

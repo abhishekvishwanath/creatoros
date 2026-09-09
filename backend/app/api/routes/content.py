@@ -32,8 +32,18 @@ from app.domain.content.service import (
     get_content_item,
     get_script,
     list_scripts,
+    mark_content_stage,
+    publish_content_item,
+    schedule_content_item,
 )
 from app.domain.creator.models import Creator
+from app.schemas.calendar import (
+    CalendarEventRead,
+    PublishContentRequest,
+    PublishContentResponse,
+    ScheduleContentRequest,
+    ScheduleContentResponse,
+)
 from app.schemas.content import (
     ContentBriefRead,
     ContentDetailRead,
@@ -321,4 +331,100 @@ async def review_script(
         reviewed=_validate_or_502(ScriptRead, script, label="Editorial Critic"),
         rewrite=rewrite_read,
         warnings=warnings,
+    )
+
+
+@router.post("/{content_item_id}/mark-recorded", response_model=ContentItemRead)
+async def mark_recorded(
+    content_item_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> ContentItem:
+    """Human-reported progress (CLAUDE.md §26) — recording happens off-app,
+    so there's nothing for an agent to do beyond letting the creator mark it
+    done. See MANUAL_STAGE_TRANSITIONS for why this is optional, not gated."""
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    try:
+        item = await mark_content_stage(db, content_item_id=content_item_id, to_status="RECORDED")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post("/{content_item_id}/mark-editing", response_model=ContentItemRead)
+async def mark_editing(
+    content_item_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> ContentItem:
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    try:
+        item = await mark_content_stage(db, content_item_id=content_item_id, to_status="EDITING")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+@router.post("/{content_item_id}/schedule", response_model=ScheduleContentResponse)
+async def schedule_content(
+    content_item_id: str,
+    payload: ScheduleContentRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> ScheduleContentResponse:
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    try:
+        item, event = await schedule_content_item(
+            db, content_item_id=content_item_id, scheduled_at=payload.scheduled_at, platform=payload.platform
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.commit()
+    await db.refresh(item)
+    await db.refresh(event)
+    return ScheduleContentResponse(
+        item=ContentItemRead.model_validate(item),
+        event=CalendarEventRead(
+            id=event.id,
+            content_item_id=event.content_item_id,
+            content_title=item.title,
+            content_status=item.status,
+            content_format=item.format,
+            scheduled_at=event.scheduled_at,
+            platform=event.platform,
+            status=event.status,
+        ),
+    )
+
+
+@router.post("/{content_item_id}/publish", response_model=PublishContentResponse)
+async def publish_content(
+    content_item_id: str,
+    payload: PublishContentRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> PublishContentResponse:
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    try:
+        item, published = await publish_content_item(
+            db, content_item_id=content_item_id, url=payload.url, external_id=payload.external_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    await db.commit()
+    await db.refresh(item)
+    return PublishContentResponse(
+        item=ContentItemRead.model_validate(item), published_at=published.published_at, url=published.url
     )

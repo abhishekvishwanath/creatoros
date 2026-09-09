@@ -16,11 +16,34 @@ import {
   generateBrief,
   generateScript,
   reviewScript,
+  markContentRecorded,
+  markContentEditing,
+  scheduleContent,
+  publishContent,
   ApiError,
 } from "@/lib/api";
-import type { ContentDetailRead, ContentItemRead, OpportunityRead } from "@/lib/types";
+import type { CalendarEventRead, ContentDetailRead, ContentItemRead, OpportunityRead } from "@/lib/types";
 
-const IN_PROGRESS_STATUSES = new Set(["APPROVED", "BRIEFED", "SCRIPTED", "REVIEW"]);
+const IN_PROGRESS_STATUSES = new Set([
+  "APPROVED",
+  "BRIEFED",
+  "SCRIPTED",
+  "REVIEW",
+  "RECORDED",
+  "EDITING",
+  "SCHEDULED",
+]);
+const SCHEDULABLE_STATUSES = new Set(["REVIEW", "RECORDED", "EDITING"]);
+
+// The model is asked for real newlines inside its JSON string fields, but
+// sometimes double-escapes them (emitting the two literal characters `\`
+// and `n` instead of an actual line break) — that survives JSON parsing as
+// a literal backslash-n, which `whitespace-pre-wrap` can't turn into a line
+// break since it isn't one. Normalizing defensively here is harmless either
+// way: a body that already has real newlines is untouched.
+function normalizeScriptBody(body: string): string {
+  return body.replace(/\\n/g, "\n");
+}
 
 function severityTone(severity: string): "good" | "warn" | "bad" {
   if (severity === "high") return "bad";
@@ -36,9 +59,16 @@ export default function CreatePage() {
   const [detail, setDetail] = useState<ContentDetailRead | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [starting, setStarting] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"brief" | "script" | "review" | null>(null);
+  const [busy, setBusy] = useState<"brief" | "script" | "review" | "recorded" | "editing" | "schedule" | "publish" | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [platform, setPlatform] = useState("");
+  const [scheduleInfo, setScheduleInfo] = useState<CalendarEventRead | null>(null);
+  const [publishUrl, setPublishUrl] = useState("");
+  const [publishInfo, setPublishInfo] = useState<{ url: string | null; published_at: string } | null>(null);
 
   const refetchLists = useCallback(async () => {
     const session = getSession();
@@ -86,6 +116,11 @@ export default function CreatePage() {
     setDetail(null);
     setError(null);
     setWarnings([]);
+    setScheduledAt("");
+    setPlatform("");
+    setScheduleInfo(null);
+    setPublishUrl("");
+    setPublishInfo(null);
   }
 
   async function handleStart(opportunityId: string) {
@@ -147,6 +182,71 @@ export default function CreatePage() {
     try {
       const result = await reviewScript(session.creatorId, selectedId, scriptId);
       setWarnings(result.warnings);
+      await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleMarkRecorded() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    setBusy("recorded");
+    setError(null);
+    try {
+      await markContentRecorded(session.creatorId, selectedId);
+      await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleMarkEditing() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    setBusy("editing");
+    setError(null);
+    try {
+      await markContentEditing(session.creatorId, selectedId);
+      await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSchedule() {
+    const session = getSession();
+    if (!session || !selectedId || !scheduledAt) return;
+    setBusy("schedule");
+    setError(null);
+    try {
+      const result = await scheduleContent(session.creatorId, selectedId, {
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        platform: platform || undefined,
+      });
+      setScheduleInfo(result.event);
+      await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handlePublish() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    setBusy("publish");
+    setError(null);
+    try {
+      const result = await publishContent(session.creatorId, selectedId, { url: publishUrl || undefined });
+      setPublishInfo({ url: result.url, published_at: result.published_at });
       await refetchDetail(selectedId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
@@ -242,7 +342,7 @@ export default function CreatePage() {
                       {latestScript.status}
                     </Badge>
                   </div>
-                  <p className="whitespace-pre-wrap text-sm text-ink">{latestScript.body}</p>
+                  <p className="whitespace-pre-wrap text-sm text-ink">{normalizeScriptBody(latestScript.body)}</p>
                   {latestScript.hook_variants && latestScript.hook_variants.length > 0 && (
                     <div>
                       <p className="text-xs font-medium text-subtle">Alternate hooks</p>
@@ -279,6 +379,113 @@ export default function CreatePage() {
               )}
             </CardContent>
           </Card>
+
+          {item && ["REVIEW", "RECORDED", "EDITING", "SCHEDULED", "PUBLISHED"].includes(item.status) && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <CardTitle>Production & scheduling</CardTitle>
+                    <CardDescription>Record, edit, schedule, and publish (CLAUDE.md §26).</CardDescription>
+                  </div>
+                  <Badge tone={item.status === "PUBLISHED" ? "good" : item.status === "SCHEDULED" ? "accent" : "neutral"}>
+                    {item.status}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(item.status === "REVIEW" || item.status === "RECORDED") && (
+                  <div className="flex gap-2">
+                    {item.status === "REVIEW" && (
+                      <Button variant="secondary" onClick={handleMarkRecorded} disabled={busy !== null}>
+                        {busy === "recorded" ? "Marking…" : "Mark recorded"}
+                      </Button>
+                    )}
+                    {item.status === "RECORDED" && (
+                      <Button variant="secondary" onClick={handleMarkEditing} disabled={busy !== null}>
+                        {busy === "editing" ? "Marking…" : "Mark editing"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
+                {SCHEDULABLE_STATUSES.has(item.status) && (
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    <p className="text-xs font-medium text-subtle">
+                      Schedule this piece{item.status !== "REVIEW" ? "" : " — or skip recording/editing for text-only formats"}
+                    </p>
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div>
+                        <label className="block text-xs text-subtle" htmlFor="scheduled-at">When</label>
+                        <input
+                          id="scheduled-at"
+                          type="datetime-local"
+                          value={scheduledAt}
+                          onChange={(e) => setScheduledAt(e.target.value)}
+                          className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-subtle" htmlFor="schedule-platform">Platform</label>
+                        <input
+                          id="schedule-platform"
+                          type="text"
+                          value={platform}
+                          onChange={(e) => setPlatform(e.target.value)}
+                          placeholder={item.platform ?? "e.g. instagram"}
+                          className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink"
+                        />
+                      </div>
+                      <Button onClick={handleSchedule} disabled={busy !== null || !scheduledAt}>
+                        {busy === "schedule" ? "Scheduling…" : "Schedule"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {item.status === "SCHEDULED" && (
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    {scheduleInfo?.scheduled_at && (
+                      <p className="text-sm text-ink">
+                        Scheduled for {new Date(scheduleInfo.scheduled_at).toLocaleString()}
+                        {scheduleInfo.platform ? ` on ${scheduleInfo.platform}` : ""}.
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div>
+                        <label className="block text-xs text-subtle" htmlFor="publish-url">Published URL (optional)</label>
+                        <input
+                          id="publish-url"
+                          type="text"
+                          value={publishUrl}
+                          onChange={(e) => setPublishUrl(e.target.value)}
+                          placeholder="https://…"
+                          className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink"
+                        />
+                      </div>
+                      <Button onClick={handlePublish} disabled={busy !== null}>
+                        {busy === "publish" ? "Publishing…" : "Mark published"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {item.status === "PUBLISHED" && (
+                  <p className="text-sm text-good">
+                    Published{publishInfo?.published_at ? ` ${new Date(publishInfo.published_at).toLocaleString()}` : ""}.
+                    {publishInfo?.url && (
+                      <>
+                        {" "}
+                        <a href={publishInfo.url} target="_blank" rel="noreferrer" className="underline">
+                          {publishInfo.url}
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     );

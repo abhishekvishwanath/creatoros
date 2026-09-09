@@ -301,3 +301,45 @@ export interface AnalyzeAudienceResponse {
   segments: AudienceSegmentRead[];
   warnings: string[];
 }
+
+export interface CalendarEventRead {
+  id: string;
+  content_item_id: string | null;
+  content_title: string | null;
+  content_status: string | null;
+  content_format: string | null;
+  scheduled_at: string | null;
+  platform: string | null;
+  status: "planned" | "scheduled" | "published" | "missed";
+}
+
+export interface ScheduleContentRequest {
+  scheduled_at: string;
+  platform?: string;
+}
+
+export interface ScheduleContentResponse {
+  item: ContentItemRead;
+  event: CalendarEventRead;
+}
+
+export interface PublishContentRequest {
+  url?: string;
+  external_id?: string;
+}
+
+export interface PublishContentResponse {
+  item: ContentItemRead;
+  published_at: string;
+  url: string | null;
+}
+
+export interface BottleneckRead {
+  type: string;
+  message: string;
+  evidence: Record<string, number>;
+}
+
+export interface CapacityRead {
+  items_per_week: number | null;
+}

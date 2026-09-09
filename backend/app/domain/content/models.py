@@ -159,7 +159,17 @@ class Script(Base, TimestampMixin):
 
 
 class CalendarEvent(Base, TimestampMixin, CreatorScopedMixin):
+    """At most one calendar event per content item — enforced at the DB
+    level (not just app/domain/content/service.py::schedule_content_item's
+    update-in-place logic), the same reasoning as Script's version_number
+    constraint: without it, two concurrent schedule calls on the same item
+    could each see no existing row and both insert one, silently duplicating
+    it in list_calendar_events and double-counting it in
+    get_content_bottlenecks. Nullable content_item_id still allows many NULLs
+    (Postgres doesn't treat NULL as equal to NULL under a unique constraint)."""
+
     __tablename__ = "calendar_events"
+    __table_args__ = (UniqueConstraint("content_item_id", name="uq_calendar_events_content_item"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("calendar_event"))
     content_item_id: Mapped[Optional[str]] = mapped_column(

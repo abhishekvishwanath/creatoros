@@ -2,14 +2,24 @@
 proposed content-pipeline changes (pillars, briefs, scripts, critiques)
 take into the database."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import generate_id
-from app.domain.content.models import ContentBrief, ContentItem, ContentPillar, ContentVersion, Script
+from app.domain.content.models import (
+    CalendarEvent,
+    ContentBrief,
+    ContentItem,
+    ContentPillar,
+    ContentVersion,
+    PublishedContent,
+    Script,
+)
 from app.domain.creator.models import AudienceSegment
+from app.domain.creator.service import get_weekly_capacity
 from app.domain.research.models import Opportunity
 from app.domain.strategy.service import AVAILABLE_OPPORTUNITY_STATUSES
 
@@ -268,3 +278,195 @@ async def apply_critique(
 
     await db.flush()
     return script
+
+
+# CLAUDE.md §26 content operations. RECORDED/EDITING are human-driven — the
+# creator physically records/edits off-app, so there's nothing for an agent
+# to do here beyond letting them report progress. They're deliberately
+# optional rather than mandatory gates: a text post or carousel has nothing
+# to "record", so scheduling is allowed straight from REVIEW too (see
+# SCHEDULABLE_FROM below), not forced through both stages first.
+MANUAL_STAGE_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    "RECORDED": ("REVIEW",),
+    "EDITING": ("RECORDED",),
+}
+SCHEDULABLE_FROM = ("REVIEW", "RECORDED", "EDITING")
+
+
+async def mark_content_stage(db: AsyncSession, *, content_item_id: str, to_status: str) -> ContentItem:
+    """Raises ValueError (caller maps to 409) rather than silently no-op'ing
+    like `_advance_content_status` — this is a direct user action from a
+    button click, so an invalid transition needs to surface, not vanish."""
+    if to_status not in MANUAL_STAGE_TRANSITIONS:
+        raise ValueError(f"{to_status!r} is not a manually-settable stage.")
+    item = await db.get(ContentItem, content_item_id)
+    if item is None:
+        raise ValueError("Content item not found.")
+    allowed_from = MANUAL_STAGE_TRANSITIONS[to_status]
+    if item.status not in allowed_from:
+        raise ValueError(f"Cannot mark {to_status} from status {item.status!r} (expected one of {allowed_from}).")
+    item.status = to_status
+    await db.flush()
+    return item
+
+
+async def schedule_content_item(
+    db: AsyncSession, *, content_item_id: str, scheduled_at: datetime, platform: Optional[str]
+) -> tuple[ContentItem, CalendarEvent]:
+    item = await db.get(ContentItem, content_item_id)
+    if item is None:
+        raise ValueError("Content item not found.")
+    if item.status not in SCHEDULABLE_FROM:
+        raise ValueError(f"Cannot schedule from status {item.status!r} (expected one of {SCHEDULABLE_FROM}).")
+
+    result = await db.execute(select(CalendarEvent).where(CalendarEvent.content_item_id == content_item_id))
+    event = result.scalar_one_or_none()
+    resolved_platform = platform or item.platform
+    if event is None:
+        event = CalendarEvent(
+            id=generate_id("calendar_event"),
+            creator_id=item.creator_id,
+            content_item_id=content_item_id,
+            scheduled_at=scheduled_at,
+            platform=resolved_platform,
+            status="scheduled",
+        )
+        db.add(event)
+    else:
+        event.scheduled_at = scheduled_at
+        event.platform = resolved_platform
+        event.status = "scheduled"
+
+    item.status = "SCHEDULED"
+    await db.flush()
+    return item, event
+
+
+async def publish_content_item(
+    db: AsyncSession, *, content_item_id: str, url: Optional[str], external_id: Optional[str]
+) -> tuple[ContentItem, PublishedContent]:
+    item = await db.get(ContentItem, content_item_id)
+    if item is None:
+        raise ValueError("Content item not found.")
+    if item.status != "SCHEDULED":
+        raise ValueError(f"Cannot publish from status {item.status!r} (expected 'SCHEDULED').")
+
+    result = await db.execute(select(CalendarEvent).where(CalendarEvent.content_item_id == content_item_id))
+    event = result.scalar_one_or_none()
+    platform = (event.platform if event else None) or item.platform
+    if not platform:
+        raise ValueError("Cannot publish: no platform is set on this content item or its calendar event.")
+
+    published = PublishedContent(
+        id=generate_id("published_content"),
+        content_item_id=content_item_id,
+        platform=platform,
+        external_id=external_id,
+        url=url,
+        published_at=datetime.now(timezone.utc),
+    )
+    db.add(published)
+    if event is not None:
+        event.status = "published"
+    item.status = "PUBLISHED"
+    await db.flush()
+    return item, published
+
+
+async def list_calendar_events(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    start: Optional[datetime] = None,
+    end: Optional[datetime] = None,
+) -> list[tuple[CalendarEvent, Optional[ContentItem]]]:
+    query = (
+        select(CalendarEvent, ContentItem)
+        .outerjoin(ContentItem, ContentItem.id == CalendarEvent.content_item_id)
+        .where(CalendarEvent.creator_id == creator_id)
+    )
+    if start is not None:
+        query = query.where(CalendarEvent.scheduled_at >= start)
+    if end is not None:
+        query = query.where(CalendarEvent.scheduled_at <= end)
+    query = query.order_by(CalendarEvent.scheduled_at)
+    result = await db.execute(query)
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def get_content_bottlenecks(db: AsyncSession, *, creator_id: str) -> list[dict]:
+    """Rule-based, evidence-grounded operational flags (CLAUDE.md §26's own
+    examples: a pipeline backlog, capacity overrun). Deliberately not an
+    agent call — these are plain counts over the creator's own data with no
+    hallucination risk, so spending a model call would violate CLAUDE.md
+    §3.3 / §53 ("don't create an agent for every tiny operation")."""
+    bottlenecks: list[dict] = []
+
+    status_rows = await db.execute(
+        select(ContentItem.status, func.count(ContentItem.id))
+        .where(ContentItem.creator_id == creator_id)
+        .group_by(ContentItem.status)
+    )
+    status_counts = dict(status_rows.all())
+    backlog = status_counts.get("APPROVED", 0) + status_counts.get("BRIEFED", 0)
+    in_production = sum(status_counts.get(s, 0) for s in ("SCRIPTED", "RECORDED", "EDITING", "REVIEW"))
+    # Threshold is deliberately simple (not itself a scored/learned model):
+    # a backlog worth flagging only when there's a real, sizeable pipeline
+    # stall, not every creator with 3 fresh approvals and 1 script in flight.
+    if backlog >= 3 and backlog > in_production * 2:
+        bottlenecks.append(
+            {
+                "type": "pipeline_backlog",
+                "message": (
+                    f"{backlog} approved idea(s) are waiting on a brief or script, but only "
+                    f"{in_production} are actively moving through production."
+                ),
+                "evidence": {"approved_or_briefed": backlog, "in_production": in_production},
+            }
+        )
+
+    now = datetime.now(timezone.utc)
+    capacity = await get_weekly_capacity(db, creator_id=creator_id)
+    if capacity is not None:
+        week_end = now + timedelta(days=7)
+        scheduled_count = await db.scalar(
+            select(func.count(CalendarEvent.id)).where(
+                CalendarEvent.creator_id == creator_id,
+                CalendarEvent.status == "scheduled",
+                CalendarEvent.scheduled_at >= now,
+                CalendarEvent.scheduled_at <= week_end,
+            )
+        )
+        scheduled_count = scheduled_count or 0
+        if scheduled_count > capacity:
+            bottlenecks.append(
+                {
+                    "type": "over_capacity",
+                    "message": (
+                        f"{scheduled_count} piece(s) are scheduled in the next 7 days, above your "
+                        f"stated weekly capacity of {capacity}."
+                    ),
+                    "evidence": {"scheduled": scheduled_count, "weekly_capacity": capacity},
+                }
+            )
+
+    missed_count = await db.scalar(
+        select(func.count(CalendarEvent.id)).where(
+            CalendarEvent.creator_id == creator_id,
+            CalendarEvent.status == "scheduled",
+            CalendarEvent.scheduled_at < now,
+        )
+    )
+    if missed_count:
+        bottlenecks.append(
+            {
+                "type": "missed_schedule",
+                "message": (
+                    f"{missed_count} scheduled item(s) are past their scheduled time and haven't "
+                    "been marked published."
+                ),
+                "evidence": {"missed": missed_count},
+            }
+        )
+
+    return bottlenecks
