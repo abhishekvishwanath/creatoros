@@ -5,7 +5,7 @@ confidence + scope + evidence_ids on every row here."""
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.ids import generate_id
@@ -47,6 +47,14 @@ class StrategicLearning(Base, TimestampMixin, CreatorScopedMixin):
     auditable unit that updates it (CLAUDE.md 8.2 example event: learning.created)."""
 
     __tablename__ = "strategic_learnings"
+    __table_args__ = (
+        # domain/experiments/service.py::sync_learnings upserts by
+        # (creator_id, category) — category doubles as the dedup identity
+        # (direction + normalized factor slug), so this is the DB-level
+        # backstop against two concurrent syncs both inserting a fresh row
+        # for the same factor (same bug class as CalendarEvent in Phase 11).
+        UniqueConstraint("creator_id", "category", name="uq_strategic_learnings_creator_category"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("strategic_learning"))
     statement: Mapped[str] = mapped_column(Text)

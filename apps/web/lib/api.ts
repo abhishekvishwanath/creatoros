@@ -17,6 +17,7 @@ import type {
   GenerateOpportunitiesResponse,
   GenerateScriptResponse,
   GenerateStrategyResponse,
+  LearningRead,
   OpportunityRead,
   OpportunityStatus,
   PerformanceOverviewItem,
@@ -254,4 +255,19 @@ export function diagnosePerformance(creatorId: string, contentItemId: string) {
 
 export function getPerformanceOverview(creatorId: string) {
   return request<PerformanceOverviewItem[]>(`/creators/${creatorId}/performance/overview`);
+}
+
+export function getLearnings(creatorId: string) {
+  return request<LearningRead[]>(`/creators/${creatorId}/learnings`);
+}
+
+export function syncLearnings(creatorId: string) {
+  return request<LearningRead[]>(`/creators/${creatorId}/learnings/sync`, { method: "POST" });
+}
+
+export function retractLearning(creatorId: string, learningId: string) {
+  return request<LearningRead>(`/creators/${creatorId}/learnings/${learningId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "retracted" }),
+  });
 }

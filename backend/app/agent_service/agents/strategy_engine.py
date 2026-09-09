@@ -41,6 +41,13 @@ that isn't in the list), assign each a day_of_week integer (0=Monday ... \
 exactly the six listed above. Favor a mix of roles over repeating the same \
 one, and weight selection toward the creator's stated goals where relevant.
 
+If given strategic learnings from past performance, treat them as evidence \
+about what has and hasn't worked for this specific creator and let them \
+inform which opportunities and roles you favor — but a single post is \
+never sufficient basis for a rule, so only weight learnings that are \
+themselves already evidence-backed (they are, by construction, if given to \
+you at all).
+
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {"summary": string, "items": [{"opportunity_id": string, "day_of_week": number, \
 "portfolio_role": string}]}
@@ -83,6 +90,12 @@ class StrategyEngineAgent(BaseAgent):
         if context.content_pillars:
             names = ", ".join(p["name"] for p in context.content_pillars)
             user_parts.append(f"Existing content pillars: {names}")
+        if context.strategic_learnings:
+            learning_lines = "\n".join(
+                f"- {l['statement']} (confidence: {l['confidence']}, scope: {l['scope']})"
+                for l in context.strategic_learnings
+            )
+            user_parts.append(f"Strategic learnings from past performance:\n{learning_lines}")
 
         opp_lines = "\n".join(
             f"[{o['id']}] topic={o.get('topic')!r} subtopic={o.get('subtopic')!r} "
@@ -97,7 +110,7 @@ class StrategyEngineAgent(BaseAgent):
             system=STRATEGY_SYSTEM_PROMPT,
             user="\n\n".join(user_parts),
             label="Strategy",
-            inputs_used=["available_opportunities", "positioning", "active_goals", "content_pillars"],
+            inputs_used=["available_opportunities", "positioning", "active_goals", "content_pillars", "strategic_learnings"],
             evidence_ids=list(valid_ids),
         )
         if failure:
@@ -166,7 +179,7 @@ class StrategyEngineAgent(BaseAgent):
             status="success",
             summary=data.get("summary", f"Built a {len(valid_items)}-item weekly portfolio.") if valid_items else "Strategy: no valid items survived grounding.",
             confidence=confidence,
-            inputs_used=["available_opportunities", "positioning", "active_goals", "content_pillars"],
+            inputs_used=["available_opportunities", "positioning", "active_goals", "content_pillars", "strategic_learnings"],
             evidence_ids=list(used_ids),
             proposed_state_changes=[
                 {

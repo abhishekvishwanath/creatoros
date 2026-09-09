@@ -37,6 +37,16 @@ class _RaisingModelRouter:
         raise RuntimeError("Error code: 429 - Too Many Requests")
 
 
+class _SpyModelRouter:
+    def __init__(self, text: str):
+        self._text = text
+        self.last_kwargs: dict = {}
+
+    async def complete(self, **kwargs):
+        self.last_kwargs = kwargs
+        return ModelResponse(text=self._text, model="fake", input_tokens=1, output_tokens=1, latency_ms=1, stub=False)
+
+
 async def test_run_without_opportunities_skips_without_calling_model(build_snapshot):
     agent = StrategyEngineAgent()
     output = await agent.run(build_snapshot(), _RaisingModelRouter(), available_opportunities=[])
@@ -142,3 +152,18 @@ async def test_run_survives_model_call_raising(build_snapshot):
 
     assert output.status == "failed"
     assert any("429" in w or "Too Many Requests" in w for w in output.warnings)
+
+
+async def test_run_includes_strategic_learnings_in_the_prompt(build_snapshot):
+    """The Learning Engine (CLAUDE.md §31) only pays off if strategy
+    generation actually reads it, not just carries it in the schema."""
+    agent = StrategyEngineAgent()
+    router = _SpyModelRouter('{"summary": "s", "items": []}')
+    opportunities = [{"id": "opp_1", "topic": "budgeting", "subtopic": None, "format": None, "score": 0.8}]
+    snapshot = build_snapshot(
+        strategic_learnings=[{"id": "sl_1", "statement": "Contrarian hooks outperform.", "scope": "creator-wide", "confidence": 0.6}]
+    )
+
+    await agent.run(snapshot, router, available_opportunities=opportunities)
+
+    assert "Contrarian hooks outperform." in router.last_kwargs["user"]

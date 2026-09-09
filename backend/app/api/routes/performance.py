@@ -20,6 +20,7 @@ from app.api.deps import DbSession, get_owned_creator, validate_or_502
 from app.domain.content.service import get_content_item
 from app.domain.creator.models import Creator
 from app.domain.performance.models import PerformanceSnapshot
+from app.domain.experiments.service import sync_learnings
 from app.domain.performance.service import (
     get_performance_overview,
     ingest_performance_snapshot,
@@ -117,6 +118,12 @@ async def diagnose_performance(
             snapshot_obj = await save_diagnosis(
                 db, snapshot=snapshot_obj, diagnosis=diagnosis_data, ratios=perf_context["ratios"]
             )
+            # CLAUDE.md §60: "next week's strategy already knows what
+            # happened last week" — every fresh diagnosis re-evaluates
+            # whether any associated factor now has enough corroborating
+            # evidence to become a persisted learning (event-driven:
+            # performance.analyzed -> learning.created, CLAUDE.md §13).
+            await sync_learnings(db, creator_id=creator.id)
 
     await db.commit()
     await db.refresh(snapshot_obj)

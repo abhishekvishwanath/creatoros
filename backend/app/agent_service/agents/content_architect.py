@@ -31,6 +31,12 @@ evidence, only cite the given signal ids. Respect the creator's boundaries \
 (prohibited topics, avoided claims, rejected tones) absolutely; never \
 propose content that crosses them.
 
+If given strategic learnings from this creator's past performance (e.g. a \
+hook type or pacing pattern that has been associated with above-baseline \
+results), let them inform your choice of hook_type, hook, pacing, or \
+narrative structure where relevant to this piece's format — but don't force \
+a learning onto a piece it doesn't fit.
+
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {"objective": string, "audience_segment_name": string | null, \
 "core_insight": string, "angle": string, \
@@ -76,6 +82,12 @@ class ContentArchitectAgent(BaseAgent):
         if context.audience_segments:
             names = ", ".join(s.name for s in context.audience_segments)
             user_parts.append(f"Audience segments: {names}")
+        if context.strategic_learnings:
+            learning_lines = "\n".join(
+                f"- {l['statement']} (confidence: {l['confidence']}, scope: {l['scope']})"
+                for l in context.strategic_learnings
+            )
+            user_parts.append(f"Strategic learnings from past performance:\n{learning_lines}")
 
         user_parts.append(
             f"Content item: topic={content_item.get('topic')!r} format={content_item.get('format')!r}"
@@ -96,7 +108,7 @@ class ContentArchitectAgent(BaseAgent):
             system=BRIEF_SYSTEM_PROMPT,
             user="\n\n".join(user_parts),
             label="Content brief",
-            inputs_used=["content_item", "positioning", "voice"],
+            inputs_used=["content_item", "positioning", "voice", "strategic_learnings"],
             evidence_ids=list(valid_ids),
             # The brief's ~15-field JSON (several string-array fields) needs
             # more room than the router's conservative default — see the
@@ -138,7 +150,7 @@ class ContentArchitectAgent(BaseAgent):
             status="success",
             summary=f"Drafted a content brief for {content_item.get('topic')!r}.",
             confidence=0.5,
-            inputs_used=["content_item", "positioning", "voice"],
+            inputs_used=["content_item", "positioning", "voice", "strategic_learnings"],
             evidence_ids=cited_ids,
             proposed_state_changes=[
                 {"type": "content_brief_upsert", "data": data, "confidence": 0.5, "evidence_ids": cited_ids}

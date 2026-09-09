@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, Lightbulb } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
-import { getPerformanceOverview, ApiError } from "@/lib/api";
-import type { PerformanceOverviewItem } from "@/lib/types";
+import { getLearnings, getPerformanceOverview, retractLearning, syncLearnings, ApiError } from "@/lib/api";
+import type { LearningRead, PerformanceOverviewItem } from "@/lib/types";
 
 function ratioTone(ratio: number): "good" | "warn" | "bad" {
   if (ratio >= 1.3) return "good";
@@ -33,8 +35,11 @@ function DiagnosisSummary({ snapshot }: { snapshot: PerformanceOverviewItem["lat
 
 export default function AnalyticsPage() {
   const [overview, setOverview] = useState<PerformanceOverviewItem[]>([]);
+  const [learnings, setLearnings] = useState<LearningRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [busyLearningId, setBusyLearningId] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
     const session = getSession();
@@ -45,7 +50,12 @@ export default function AnalyticsPage() {
     setLoading(true);
     setError(null);
     try {
-      setOverview(await getPerformanceOverview(session.creatorId));
+      const [overviewData, learningsData] = await Promise.all([
+        getPerformanceOverview(session.creatorId),
+        getLearnings(session.creatorId),
+      ]);
+      setOverview(overviewData);
+      setLearnings(learningsData);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
     } finally {
@@ -57,55 +67,130 @@ export default function AnalyticsPage() {
     refetch();
   }, [refetch]);
 
+  async function handleSync() {
+    const session = getSession();
+    if (!session) return;
+    setSyncing(true);
+    try {
+      setLearnings(await syncLearnings(session.creatorId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to sync learnings.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleRetract(learningId: string) {
+    const session = getSession();
+    if (!session) return;
+    setBusyLearningId(learningId);
+    try {
+      await retractLearning(session.creatorId, learningId);
+      setLearnings((prev) => prev.filter((l) => l.id !== learningId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to retract learning.");
+    } finally {
+      setBusyLearningId(null);
+    }
+  }
+
   return (
     <div>
       <PageHeader title="Analytics" description="What changed, why it may have changed, and what to test next." />
-      <div className="p-8">
+      <div className="p-8 space-y-8">
         {loading ? (
           <p className="text-sm text-subtle">Loading…</p>
         ) : error ? (
           <p className="text-sm text-bad">{error}</p>
-        ) : overview.length === 0 ? (
-          <EmptyState
-            icon={BarChart3}
-            title="No performance data yet"
-            description="Once content is published, log its metrics from the Create page and diagnoses will appear here compared against your own baseline — never raw numbers without interpretation."
-          />
         ) : (
-          <Card>
-            <CardContent className="p-0">
-              <ul className="divide-y divide-border">
-                {overview.map((row) => (
-                  <li key={row.content_item_id} className="p-4">
-                    <Link href={`/create?item=${row.content_item_id}`} className="block">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium text-ink">{row.title ?? row.topic ?? "Untitled"}</p>
-                          <p className="text-xs text-subtle">
-                            {row.format ?? "—"}
-                            {row.platform ? ` · ${row.platform}` : ""}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {row.latest_snapshot ? (
-                            <>
-                              <ViewsRatio snapshot={row.latest_snapshot} />
-                              {row.latest_snapshot.views !== null && (
-                                <Badge tone="neutral">{row.latest_snapshot.views.toLocaleString()} views</Badge>
-                              )}
-                            </>
-                          ) : (
-                            <Badge tone="neutral">No metrics logged</Badge>
-                          )}
-                        </div>
-                      </div>
-                      <DiagnosisSummary snapshot={row.latest_snapshot} />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
+          <>
+            <section>
+              {overview.length === 0 ? (
+                <EmptyState
+                  icon={BarChart3}
+                  title="No performance data yet"
+                  description="Once content is published, log its metrics from the Create page and diagnoses will appear here compared against your own baseline — never raw numbers without interpretation."
+                />
+              ) : (
+                <Card>
+                  <CardContent className="p-0">
+                    <ul className="divide-y divide-border">
+                      {overview.map((row) => (
+                        <li key={row.content_item_id} className="p-4">
+                          <Link href={`/create?item=${row.content_item_id}`} className="block">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-ink">{row.title ?? row.topic ?? "Untitled"}</p>
+                                <p className="text-xs text-subtle">
+                                  {row.format ?? "—"}
+                                  {row.platform ? ` · ${row.platform}` : ""}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {row.latest_snapshot ? (
+                                  <>
+                                    <ViewsRatio snapshot={row.latest_snapshot} />
+                                    {row.latest_snapshot.views !== null && (
+                                      <Badge tone="neutral">{row.latest_snapshot.views.toLocaleString()} views</Badge>
+                                    )}
+                                  </>
+                                ) : (
+                                  <Badge tone="neutral">No metrics logged</Badge>
+                                )}
+                              </div>
+                            </div>
+                            <DiagnosisSummary snapshot={row.latest_snapshot} />
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-ink">Strategic learnings</h2>
+                <Button variant="secondary" onClick={handleSync} disabled={syncing}>
+                  {syncing ? "Syncing…" : "Re-sync from diagnoses"}
+                </Button>
+              </div>
+              {learnings.length === 0 ? (
+                <EmptyState
+                  icon={Lightbulb}
+                  title="No learnings yet"
+                  description="Once at least two diagnosed posts point to the same factor (e.g. a hook type or pacing pattern), it becomes a persistent learning here — and future strategy and briefs will take it into account."
+                />
+              ) : (
+                <Card>
+                  <CardContent className="p-0">
+                    <ul className="divide-y divide-border">
+                      {learnings.map((learning) => (
+                        <li key={learning.id} className="p-4 flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-ink">{learning.statement}</p>
+                            <div className="mt-1 flex items-center gap-2">
+                              <ConfidenceBadge confidence={learning.confidence} />
+                              <Badge tone="neutral">{learning.scope}</Badge>
+                              <Badge tone="neutral">{learning.evidence_ids.length} posts</Badge>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            onClick={() => handleRetract(learning.id)}
+                            disabled={busyLearningId === learning.id}
+                          >
+                            Not accurate
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                </Card>
+              )}
+            </section>
+          </>
         )}
       </div>
     </div>

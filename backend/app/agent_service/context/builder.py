@@ -26,6 +26,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
 from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
 from app.domain.strategy.service import list_available_opportunities
@@ -111,6 +112,17 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
     segments_result = await db.execute(select(AudienceSegment).where(AudienceSegment.creator_id == creator.id))
     audience_segments = [AudienceSegmentRead.model_validate(s) for s in segments_result.scalars().all()]
 
+    active_learnings = await list_learnings(db, creator_id=creator.id, status_filter="active", limit=20)
+    strategic_learnings = [
+        {
+            "id": learning.id,
+            "statement": learning.statement,
+            "scope": learning.scope,
+            "confidence": learning.confidence,
+        }
+        for learning in active_learnings
+    ]
+
     return CreatorStateSnapshot(
         creator=CreatorRead.model_validate(creator),
         positioning=CreatorProfileRead.model_validate(profile) if profile else None,
@@ -121,6 +133,7 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         content_pillars=content_pillars,
         current_research_signals=current_research_signals,
         audience_segments=audience_segments,
+        strategic_learnings=strategic_learnings,
     )
 
 

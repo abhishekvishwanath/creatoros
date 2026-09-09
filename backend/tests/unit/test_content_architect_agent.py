@@ -37,6 +37,16 @@ class _RaisingModelRouter:
         raise RuntimeError("Error code: 429 - Too Many Requests")
 
 
+class _SpyModelRouter:
+    def __init__(self, text: str):
+        self._text = text
+        self.last_kwargs: dict = {}
+
+    async def complete(self, **kwargs):
+        self.last_kwargs = kwargs
+        return ModelResponse(text=self._text, model="fake", input_tokens=1, output_tokens=1, latency_ms=1, stub=False)
+
+
 BRIEF_JSON = (
     '{"objective": "Teach budgeting basics", "core_insight": "x", "angle": "envelope method", '
     '"hook_type": "contrarian", "hook": "Budgeting apps are lying to you", '
@@ -91,3 +101,16 @@ async def test_run_survives_model_call_raising(build_snapshot):
 
     assert output.status == "failed"
     assert any("429" in w or "Too Many Requests" in w for w in output.warnings)
+
+
+async def test_run_includes_strategic_learnings_in_the_prompt(build_snapshot):
+    agent = ContentArchitectAgent()
+    router = _SpyModelRouter(BRIEF_JSON)
+    content_item = {"id": "cnt_1", "topic": "budgeting", "format": "short", "title": "budgeting"}
+    snapshot = build_snapshot(
+        strategic_learnings=[{"id": "sl_1", "statement": "Contrarian hooks outperform.", "scope": "creator-wide", "confidence": 0.6}]
+    )
+
+    await agent.run(snapshot, router, content_item=content_item)
+
+    assert "Contrarian hooks outperform." in router.last_kwargs["user"]

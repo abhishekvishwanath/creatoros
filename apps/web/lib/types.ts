@@ -84,6 +84,13 @@ export interface ResearchSignalSummary {
   format: string | null;
 }
 
+export interface StrategicLearningSummary {
+  id: string;
+  statement: string;
+  scope: string;
+  confidence: number;
+}
+
 export interface CreatorStateSnapshot {
   creator: CreatorRead;
   positioning: CreatorProfileRead | null;
@@ -97,7 +104,7 @@ export interface CreatorStateSnapshot {
   recent_failures: unknown[];
   current_research_signals: ResearchSignalSummary[];
   active_experiments: unknown[];
-  strategic_learnings: unknown[];
+  strategic_learnings: StrategicLearningSummary[];
 }
 
 export interface AnalyzeCreatorResponse {
@@ -401,4 +408,16 @@ export interface PerformanceOverviewItem {
   format: string | null;
   platform: string | null;
   latest_snapshot: PerformanceSnapshotRead | null;
+}
+
+export interface LearningRead {
+  id: string;
+  statement: string;
+  category: string | null;
+  evidence_ids: string[];
+  confidence: number;
+  first_observed_at: string;
+  last_validated_at: string | null;
+  status: string;
+  scope: string;
 }
