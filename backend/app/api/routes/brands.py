@@ -11,17 +11,25 @@ only thing standing between one creator and another creator's contacts.
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.agent_service.agents.brand_intelligence import BrandIntelligenceAgent
-from app.agent_service.context.builder import build_brand_opportunity_context, build_creator_state_snapshot
+from app.agent_service.agents.campaign_intelligence import CampaignIntelligenceAgent
+from app.agent_service.context.builder import (
+    build_brand_opportunity_context,
+    build_campaign_brief_context,
+    build_creator_state_snapshot,
+)
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
 from app.api.deps import DbSession, get_owned_creator, validate_or_502
-from app.domain.commercial.models import Brand, BrandContact, BrandSignal
+from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal
 from app.domain.commercial.service import (
     add_brand_contact,
     add_brand_signal,
     apply_brand_opportunity_score,
+    apply_campaign_brief,
     create_brand,
     get_brand,
+    get_brand_opportunity_by_id,
+    get_campaign_brief,
     list_brand_contacts,
     list_brand_opportunities,
     list_brand_signals,
@@ -37,6 +45,8 @@ from app.schemas.commercial import (
     BrandRead,
     BrandSignalCreate,
     BrandSignalRead,
+    CampaignBriefRead,
+    GenerateCampaignBriefResponse,
     ScoreBrandOpportunityResponse,
 )
 
@@ -185,3 +195,65 @@ async def list_brand_radar(
 ) -> list[BrandRadarItem]:
     rows = await list_brand_opportunities(db, creator_id=creator.id)
     return [BrandRadarItem(brand=brand, opportunity=opportunity) for opportunity, brand in rows]
+
+
+async def _get_owned_opportunity(db: DbSession, creator: Creator, opportunity_id: str) -> BrandOpportunity:
+    opportunity = await get_brand_opportunity_by_id(db, creator_id=creator.id, opportunity_id=opportunity_id)
+    if opportunity is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Brand opportunity not found")
+    return opportunity
+
+
+@radar_router.get("/{opportunity_id}/campaign-brief", response_model=CampaignBriefRead | None)
+async def get_campaign_brief_route(
+    opportunity_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+):
+    await _get_owned_opportunity(db, creator, opportunity_id)
+    return await get_campaign_brief(db, brand_opportunity_id=opportunity_id)
+
+
+@radar_router.post("/{opportunity_id}/campaign-brief", response_model=GenerateCampaignBriefResponse)
+async def generate_campaign_brief_route(
+    opportunity_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> GenerateCampaignBriefResponse:
+    opportunity = await _get_owned_opportunity(db, creator, opportunity_id)
+    brand = await _get_owned_brand(db, creator, opportunity.brand_id)
+    brief_context = await build_campaign_brief_context(db, opportunity, brand)
+    creator_snapshot = await build_creator_state_snapshot(db, creator)
+
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    output = await orchestrator.run_agent(
+        agent=CampaignIntelligenceAgent(),
+        creator_id=creator.id,
+        workflow_name="campaign_brief_generation",
+        context=creator_snapshot,
+        brand=brief_context["brand"],
+        signals=brief_context["signals"],
+        opportunity=brief_context["opportunity"],
+    )
+
+    if output.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=output.summary + ("; " + "; ".join(output.warnings) if output.warnings else ""),
+        )
+
+    brief_read = None
+    for change in output.proposed_state_changes:
+        if change.get("type") == "campaign_brief_upsert":
+            brief_data = change["data"]
+            brief = await apply_campaign_brief(
+                db,
+                brand_opportunity_id=opportunity_id,
+                data=brief_data,
+                evidence_signal_ids=brief_data.get("evidence_signal_ids", []),
+                confidence=change.get("confidence", 0.0),
+            )
+            brief_read = validate_or_502(CampaignBriefRead, brief, label="Campaign Intelligence")
+
+    await db.commit()
+    return GenerateCampaignBriefResponse(brief=brief_read, warnings=output.warnings)

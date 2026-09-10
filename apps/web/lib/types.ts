@@ -534,6 +534,27 @@ export interface ScoreBrandOpportunityResponse {
   warnings: string[];
 }
 
+export interface CampaignBriefRead {
+  id: string;
+  brand_opportunity_id: string;
+  objective_hypothesis: string | null;
+  campaign_concept: string | null;
+  content_format: string | null;
+  why_this_brand: string | null;
+  why_now: string | null;
+  suggested_cta: string | null;
+  suggested_deliverables: string[] | null;
+  pitch_angle: string | null;
+  personalization_facts: string[] | null;
+  evidence_signal_ids: string[];
+  confidence: number;
+}
+
+export interface GenerateCampaignBriefResponse {
+  brief: CampaignBriefRead | null;
+  warnings: string[];
+}
+
 export interface BrandRadarItem {
   brand: BrandRead;
   opportunity: BrandOpportunityRead;

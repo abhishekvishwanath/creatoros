@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Building2, Users, Radar, Sparkles } from "lucide-react";
+import { Building2, Users, Radar, Sparkles, Megaphone } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,9 @@ import {
   addBrandContact,
   addBrandSignal,
   createBrand,
+  generateCampaignBrief,
   getBrand,
+  getCampaignBrief,
   listBrandContacts,
   listBrandRadar,
   listBrandSignals,
@@ -22,7 +24,7 @@ import {
   scoreBrandOpportunity,
   ApiError,
 } from "@/lib/api";
-import type { BrandContactRead, BrandRadarItem, BrandRead, BrandSignalRead } from "@/lib/types";
+import type { BrandContactRead, BrandRadarItem, BrandRead, BrandSignalRead, CampaignBriefRead } from "@/lib/types";
 
 const inputClass = "rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent";
 
@@ -292,6 +294,11 @@ function BrandsPageInner() {
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [scoreWarnings, setScoreWarnings] = useState<string[]>([]);
   const [contactRolePrefill, setContactRolePrefill] = useState<string | null>(null);
+  const [campaignBrief, setCampaignBrief] = useState<CampaignBriefRead | null>(null);
+  const [loadingBrief, setLoadingBrief] = useState(false);
+  const [generatingBrief, setGeneratingBrief] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefWarnings, setBriefWarnings] = useState<string[]>([]);
 
   const refetchBrands = useCallback(async () => {
     const session = getSession();
@@ -327,6 +334,49 @@ function BrandsPageInner() {
   }, [refetchBrands, refetchRadar]);
 
   const currentOpportunity = selected ? radar.find((r) => r.brand.id === selected.id)?.opportunity ?? null : null;
+
+  // Keyed on the opportunity id (not selectedId) so it naturally clears when
+  // switching to a brand with no score yet, and re-fetches after a brand
+  // gets scored for the first time (currentOpportunity flips from null to
+  // an id) without needing a separate reset in selectBrand.
+  const opportunityId = currentOpportunity?.id ?? null;
+  useEffect(() => {
+    if (!opportunityId) {
+      setCampaignBrief(null);
+      return;
+    }
+    const session = getSession();
+    if (!session) return;
+    let cancelled = false;
+    setLoadingBrief(true);
+    getCampaignBrief(session.creatorId, opportunityId)
+      .then((brief) => {
+        if (!cancelled) setCampaignBrief(brief);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBrief(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [opportunityId]);
+
+  async function handleGenerateBrief() {
+    const session = getSession();
+    if (!session || !opportunityId) return;
+    setGeneratingBrief(true);
+    setBriefError(null);
+    setBriefWarnings([]);
+    try {
+      const result = await generateCampaignBrief(session.creatorId, opportunityId);
+      setBriefWarnings(result.warnings);
+      if (result.brief) setCampaignBrief(result.brief);
+    } catch (err) {
+      setBriefError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      setGeneratingBrief(false);
+    }
+  }
 
   async function handleScore() {
     const session = getSession();
@@ -371,6 +421,8 @@ function BrandsPageInner() {
       setScoreError(null);
       setScoreWarnings([]);
       setContactRolePrefill(null);
+      setBriefError(null);
+      setBriefWarnings([]);
       router.replace(id ? `/brands?brand=${id}` : "/brands");
     },
     [router]
@@ -608,6 +660,81 @@ function BrandsPageInner() {
                     !scoreError && scoreWarnings.length === 0 && (
                       <p className="text-sm text-subtle">Not scored yet.</p>
                     )
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Megaphone className="h-4 w-4 text-accent" /> Campaign pitch
+                      </CardTitle>
+                      <CardDescription>A draft starting point — nothing here is sent or agreed to until you say so.</CardDescription>
+                    </div>
+                    {currentOpportunity && (
+                      <Button variant="secondary" onClick={handleGenerateBrief} disabled={generatingBrief}>
+                        {generatingBrief ? "Drafting…" : campaignBrief ? "Regenerate" : "Create pitch"}
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {!currentOpportunity && (
+                    <p className="text-sm text-subtle">Score this brand first, then draft a pitch from the result.</p>
+                  )}
+                  {briefError && <p className="text-sm text-bad">{briefError}</p>}
+                  {briefWarnings.length > 0 && <p className="text-sm text-warn">{briefWarnings.join(" ")}</p>}
+                  {loadingBrief && <p className="text-sm text-subtle">Loading…</p>}
+                  {campaignBrief && (
+                    <div className="space-y-2.5 text-sm">
+                      {campaignBrief.campaign_concept && (
+                        <p className="font-medium text-ink">{campaignBrief.campaign_concept}</p>
+                      )}
+                      {campaignBrief.pitch_angle && (
+                        <p className="italic text-subtle">&ldquo;{campaignBrief.pitch_angle}&rdquo;</p>
+                      )}
+                      {campaignBrief.objective_hypothesis && (
+                        <p><span className="text-subtle">Objective: </span>{campaignBrief.objective_hypothesis}</p>
+                      )}
+                      {campaignBrief.content_format && (
+                        <p><span className="text-subtle">Format: </span>{campaignBrief.content_format}</p>
+                      )}
+                      {campaignBrief.why_this_brand && (
+                        <p><span className="text-subtle">Why this brand: </span>{campaignBrief.why_this_brand}</p>
+                      )}
+                      {campaignBrief.why_now && (
+                        <p><span className="text-subtle">Why now: </span>{campaignBrief.why_now}</p>
+                      )}
+                      {campaignBrief.suggested_cta && (
+                        <p><span className="text-subtle">Suggested CTA: </span>{campaignBrief.suggested_cta}</p>
+                      )}
+                      {campaignBrief.suggested_deliverables && campaignBrief.suggested_deliverables.length > 0 && (
+                        <div>
+                          <p className="text-subtle">Proposed deliverables — a starting point to negotiate, not a commitment:</p>
+                          <ul className="list-disc space-y-0.5 pl-5">
+                            {campaignBrief.suggested_deliverables.map((d) => (
+                              <li key={d} className="text-ink">{d}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {campaignBrief.personalization_facts && campaignBrief.personalization_facts.length > 0 && (
+                        <div>
+                          <p className="text-subtle">Worth mentioning in outreach:</p>
+                          <ul className="list-disc space-y-0.5 pl-5">
+                            {campaignBrief.personalization_facts.map((f) => (
+                              <li key={f} className="text-ink">{f}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      <ConfidenceBadge confidence={campaignBrief.confidence} />
+                    </div>
+                  )}
+                  {!campaignBrief && !loadingBrief && currentOpportunity && !briefError && briefWarnings.length === 0 && (
+                    <p className="text-sm text-subtle">No pitch drafted yet.</p>
                   )}
                 </CardContent>
               </Card>

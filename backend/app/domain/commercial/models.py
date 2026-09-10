@@ -155,3 +155,35 @@ class BrandOpportunity(Base, TimestampMixin, CreatorScopedMixin):
     # an ephemeral warning on the scoring response) so the Brand Radar and a
     # revisited detail view still surface it without re-scoring.
     prohibited_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class CampaignBrief(Base, TimestampMixin):
+    """Part II Phase 5 (CLAUDE.md commercial spec §9). One current brief per
+    BrandOpportunity — "Create pitch" regenerates it in place, mirroring
+    ContentBrief's single-current-row convention (app/domain/content/models.py).
+    Unlike ContentBrief there's no parallel ContentVersion-style history table
+    yet: nothing reads a campaign brief's history until Phase 6's
+    OutreachThread exists, so building that now would be speculative.
+
+    `suggested_deliverables` is explicitly a proposal, never a commitment —
+    enforced by UI copy (Part II §66: the system never commits anything on
+    the creator's behalf), not just by this field's name."""
+
+    __tablename__ = "campaign_briefs"
+    __table_args__ = (UniqueConstraint("brand_opportunity_id", name="uq_campaign_briefs_brand_opportunity"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("campaign_brief"))
+    brand_opportunity_id: Mapped[str] = mapped_column(
+        String, ForeignKey("brand_opportunities.id", ondelete="CASCADE"), index=True
+    )
+    objective_hypothesis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    campaign_concept: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_format: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    why_this_brand: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    why_now: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    suggested_cta: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    suggested_deliverables: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    pitch_angle: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    personalization_facts: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    evidence_signal_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)

@@ -16,7 +16,14 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import generate_id
-from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal, CommercialProfile
+from app.domain.commercial.models import (
+    Brand,
+    BrandContact,
+    BrandOpportunity,
+    BrandSignal,
+    CampaignBrief,
+    CommercialProfile,
+)
 from app.domain.shared.versioned_profile import apply_versioned_profile_update, get_current_versioned_profile
 
 _PROFILE_FIELDS = (
@@ -237,3 +244,68 @@ async def list_brand_opportunities(db: AsyncSession, *, creator_id: str) -> list
         .order_by(desc(BrandOpportunity.score))
     )
     return [(opp, brand) for opp, brand in result.all()]
+
+
+async def get_brand_opportunity_by_id(
+    db: AsyncSession, *, creator_id: str, opportunity_id: str
+) -> Optional[BrandOpportunity]:
+    result = await db.execute(
+        select(BrandOpportunity).where(
+            BrandOpportunity.id == opportunity_id, BrandOpportunity.creator_id == creator_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+# --- Campaign intelligence / pitch generation (CLAUDE.md §73, Part II Phase 5) --
+
+
+async def get_campaign_brief(db: AsyncSession, *, brand_opportunity_id: str) -> Optional[CampaignBrief]:
+    result = await db.execute(
+        select(CampaignBrief).where(CampaignBrief.brand_opportunity_id == brand_opportunity_id)
+    )
+    return result.scalar_one_or_none()
+
+
+_CAMPAIGN_BRIEF_FIELDS = (
+    "objective_hypothesis",
+    "campaign_concept",
+    "content_format",
+    "why_this_brand",
+    "why_now",
+    "suggested_cta",
+    "suggested_deliverables",
+    "pitch_angle",
+    "personalization_facts",
+)
+
+
+async def apply_campaign_brief(
+    db: AsyncSession,
+    *,
+    brand_opportunity_id: str,
+    data: dict,
+    evidence_signal_ids: list[str],
+    confidence: float,
+) -> CampaignBrief:
+    """One current brief per BrandOpportunity — "Create pitch" again
+    regenerates this row in place rather than accumulating duplicates (same
+    upsert-by-foreign-key discipline as apply_brand_opportunity_score)."""
+    field_values = {field: data[field] for field in _CAMPAIGN_BRIEF_FIELDS if field in data}
+
+    brief = await get_campaign_brief(db, brand_opportunity_id=brand_opportunity_id)
+    if brief is None:
+        brief = CampaignBrief(
+            id=generate_id("campaign_brief"),
+            brand_opportunity_id=brand_opportunity_id,
+            **field_values,
+        )
+        db.add(brief)
+    else:
+        for field, value in field_values.items():
+            setattr(brief, field, value)
+
+    brief.evidence_signal_ids = evidence_signal_ids
+    brief.confidence = confidence
+    await db.flush()
+    return brief

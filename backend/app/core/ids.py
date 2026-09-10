@@ -44,6 +44,7 @@ PREFIXES = {
     "brand_contact": "bcontact",
     "brand_signal": "bsig",
     "brand_opportunity": "bopp",
+    "campaign_brief": "cbrief",
     "agent_run": "run",
     "agent_message": "msg",
     "agent_tool_call": "tool",

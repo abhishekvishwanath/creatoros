@@ -12,6 +12,7 @@ import type {
   BrandSignalCreate,
   BrandSignalRead,
   CalendarEventRead,
+  CampaignBriefRead,
   CapacityRead,
   CommercialProfileRead,
   CommercialProfileUpdate,
@@ -23,6 +24,7 @@ import type {
   CreatorStateSnapshot,
   DiagnoseResponse,
   GenerateBriefResponse,
+  GenerateCampaignBriefResponse,
   GenerateOpportunitiesResponse,
   GenerateScriptResponse,
   GenerateStrategyResponse,
@@ -323,6 +325,17 @@ export function scoreBrandOpportunity(creatorId: string, brandId: string) {
 
 export function listBrandRadar(creatorId: string) {
   return request<BrandRadarItem[]>(`/creators/${creatorId}/brand-opportunities`);
+}
+
+export function getCampaignBrief(creatorId: string, opportunityId: string) {
+  return request<CampaignBriefRead | null>(`/creators/${creatorId}/brand-opportunities/${opportunityId}/campaign-brief`);
+}
+
+export function generateCampaignBrief(creatorId: string, opportunityId: string) {
+  return request<GenerateCampaignBriefResponse>(
+    `/creators/${creatorId}/brand-opportunities/${opportunityId}/campaign-brief`,
+    { method: "POST" }
+  );
 }
 
 export function getLearnings(creatorId: string) {

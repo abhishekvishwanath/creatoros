@@ -154,3 +154,33 @@ class BrandSignalRead(BaseModel):
     evidence_quality: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class CampaignBriefRead(BaseModel):
+    id: str
+    brand_opportunity_id: str
+    objective_hypothesis: Optional[str] = None
+    campaign_concept: Optional[str] = None
+    content_format: Optional[str] = None
+    why_this_brand: Optional[str] = None
+    why_now: Optional[str] = None
+    suggested_cta: Optional[str] = None
+    # A proposal the creator (and eventually the brand) still negotiates —
+    # never presented as agreed-upon (CLAUDE.md §66). Optional/None (not a
+    # [] default) because apply_campaign_brief only ever sets a field that
+    # was present in the agent's response — a never-generated brief field
+    # stays None (genuinely nullable at the DB level), distinct from the
+    # model explicitly proposing zero deliverables (same None-vs-[]
+    # distinction already documented on CommercialProfileRead).
+    suggested_deliverables: Optional[list[str]] = None
+    pitch_angle: Optional[str] = None
+    personalization_facts: Optional[list[str]] = None
+    evidence_signal_ids: list[str] = Field(default_factory=list)
+    confidence: float
+
+    model_config = {"from_attributes": True}
+
+
+class GenerateCampaignBriefResponse(BaseModel):
+    brief: Optional[CampaignBriefRead] = None
+    warnings: list[str] = Field(default_factory=list)

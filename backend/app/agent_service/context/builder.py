@@ -26,7 +26,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
-from app.domain.commercial.models import Brand, BrandContact, BrandSignal
+from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal
 from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
@@ -355,4 +355,38 @@ async def build_brand_opportunity_context(db: AsyncSession, brand: Brand) -> dic
         "signals": signals,
         "existing_contact_roles": [c.role for c in contacts if c.role],
         "contactability": compute_contactability(contacts),
+    }
+
+
+async def build_campaign_brief_context(db: AsyncSession, opportunity: BrandOpportunity, brand: Brand) -> dict:
+    """Task-specific context slice for the Campaign Intelligence Agent
+    (CLAUDE.md commercial spec §9, Part II Phase 5): the brand's own fields,
+    the signals already used as scoring evidence (so a pitch can cite the
+    same concrete facts, not invent new ones), and the fit score's own
+    reasons/components — grounding "why this brand, why now" in what the
+    system already determined rather than re-deriving it."""
+    signal_ids = opportunity.evidence_signal_ids or []
+    signals: list[dict] = []
+    if signal_ids:
+        signals_result = await db.execute(select(BrandSignal).where(BrandSignal.id.in_(signal_ids)))
+        signals = [
+            {"id": s.id, "signal_type": s.signal_type, "summary": s.summary}
+            for s in signals_result.scalars().all()
+        ]
+
+    return {
+        "brand": {
+            "id": brand.id,
+            "name": brand.name,
+            "category": brand.category,
+            "description": brand.description,
+            "positioning": brand.positioning,
+        },
+        "signals": signals,
+        "opportunity": {
+            "id": opportunity.id,
+            "score": opportunity.score,
+            "score_components": opportunity.score_components,
+            "reasons": opportunity.reasons,
+        },
     }
