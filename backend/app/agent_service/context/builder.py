@@ -26,10 +26,12 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
 from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
 from app.domain.strategy.service import list_available_opportunities
+from app.schemas.commercial import CommercialProfileRead
 from app.schemas.creator import (
     AudienceProfileRead,
     AudienceSegmentRead,
@@ -112,6 +114,8 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
     segments_result = await db.execute(select(AudienceSegment).where(AudienceSegment.creator_id == creator.id))
     audience_segments = [AudienceSegmentRead.model_validate(s) for s in segments_result.scalars().all()]
 
+    commercial_profile = await get_current_commercial_profile(db, creator_id=creator.id)
+
     active_learnings = await list_learnings(db, creator_id=creator.id, status_filter="active", limit=20)
     strategic_learnings = [
         {
@@ -134,6 +138,7 @@ async def build_creator_state_snapshot(db: AsyncSession, creator: Creator) -> Cr
         current_research_signals=current_research_signals,
         audience_segments=audience_segments,
         strategic_learnings=strategic_learnings,
+        commercial_profile=CommercialProfileRead.model_validate(commercial_profile) if commercial_profile else None,
     )
 
 

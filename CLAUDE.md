@@ -8,7 +8,7 @@ Read this file before making architectural, product, workflow, database, agent, 
 
 This product is NOT simply an AI script generator, social scheduler, trend dashboard, or content calendar.
 
-The product is an **AI Content Intelligence & Growth Operating System for growing creators**.
+The product is an **AI Content + Commercial Intelligence Operating System for growing creators**. Sections 1–64 below define the Content Intelligence loop (the original core); [Part II](#part-ii--commercial-intelligence--brand-outbound-layer) at the end of this file defines the Commercial Intelligence loop (brand/sponsorship discovery and outbound) that runs alongside it, sharing the same Creator Brain, Learning Engine, and Creator State. Both loops are the product — read Part II before touching anything commercial-layer related (brands, contacts, outreach, campaign briefs).
 
 The system continuously learns:
 
@@ -2849,3 +2849,182 @@ Everything in the architecture should serve that loop.
 When there is a conflict between adding a flashy feature and strengthening the intelligence loop, strengthen the intelligence loop.
 
 The final product should feel less like a chatbot and more like a **persistent AI content department that knows the creator, understands the market, makes recommendations, helps execute them, and gets smarter after every post.**
+
+---
+
+# PART II — COMMERCIAL INTELLIGENCE / BRAND OUTBOUND LAYER
+
+## 65. WHY THIS EXISTS
+
+Sections 1–64 cover the Content Intelligence loop. This part adds a second,
+parallel loop: brand/sponsorship discovery and outbound. It is an
+**extension** of everything above, not a separate product bolted on.
+
+```text
+                    CREATOROS
+                        |
+              +---------+---------+
+              |                   |
+              v                   v
+       GROWTH INTELLIGENCE   COMMERCIAL INTELLIGENCE
+              |                   |
+       content loop          brand outbound loop
+              |                   |
+              +---------+---------+
+                        |
+                        v
+                 LEARNING ENGINE
+                        |
+                        v
+                  CREATOR STATE
+                        |
+                        v
+                 NEXT BEST ACTION
+```
+
+Both loops share the same Creator Brain (Creator/Audience/Content
+Intelligence), the same Market Intelligence, the same Learning Engine
+(`app/domain/experiments`), and the same `CreatorStateSnapshot`. Do not
+duplicate any of §1–64's infrastructure to serve the commercial loop —
+extend it. If you're about to create a second creator-identity table, a
+second learning table, or a second evidence-provenance pattern for
+commercial data, stop: reuse the existing one instead (§3.7 one source of
+truth applies here too).
+
+The commercial loop:
+
+```text
+CREATOR COMMERCIAL PROFILE
+→ BRAND DISCOVERY
+→ BRAND INTELLIGENCE / QUALIFICATION
+→ CONTACT DISCOVERY
+→ OPPORTUNITY SCORING
+→ CAMPAIGN INTELLIGENCE
+→ PERSONALIZED OUTREACH
+→ FOLLOW-UP
+→ BRAND RESPONSE
+→ RESPONSE EXTRACTION
+→ CREATOR DECISION
+→ OUTCOME
+→ COMMERCIAL LEARNING
+→ CREATOR STATE
+```
+
+## 66. NON-NEGOTIABLE: THE OUTREACH AGENT NEVER DECIDES
+
+The Outreach Agent (`app/agent_service/agents/outreach.py`) is the last agent
+in the commercial pipeline. It may research, qualify, personalize, draft,
+prepare follow-ups, classify a brand's response, and extract structured
+information from it. It may **never**: negotiate, counteroffer, accept,
+reject, promise, commit, or sign anything on the creator's behalf, or write
+to a thread's `status`/`outcome`/`creator_decision` fields directly. Those
+fields are written only by a route, only in response to an explicit creator
+action. When a brand replies, the system stops at **CREATOR DECISION** and
+presents the creator with everything needed to decide — it does not decide
+for them. This is a hard constraint, enforced at the route/schema level, not
+just prompt wording — treat any code path that could bypass it as a
+correctness bug, not a style issue.
+
+Default automation posture (can be relaxed later, never skipped by default):
+AI researches → AI scores → AI drafts → **CREATOR APPROVES** → creator sends.
+
+## 67. COMMERCIAL CREATOR DNA
+
+Extends Creator State (§5), not a separate identity system. Lives in
+`CommercialProfile` (`app/domain/commercial/models.py`), versioned the same
+way `CreatorProfile`/`VoiceProfile` are (§7 pattern): ideal/prohibited sponsor
+categories, target geographies, preferred deal formats, minimum acceptable
+conditions, exclusivity/usage-right preferences, sponsorship/revenue goals,
+brands to avoid. Same rule as the rest of Creator DNA: the creator can always
+inspect and correct it (§3.2, §38).
+
+## 68. BRAND ENTITIES
+
+`app/domain/commercial/models.py`: `Brand` (creator-scoped, like
+`Competitor` — see §69 for why it is *not* a shared global table),
+`BrandContact`, `BrandSignal`, `BrandOpportunity`, `CampaignBrief`,
+`OutreachThread`, `OutreachMessage`. Every externally-sourced fact keeps
+`source`/`confidence`/`verification_state` the same way research signals and
+performance data already do (§16). Never fabricate a contact, a signal, or a
+specific brand event that wasn't given as evidence — same hallucination
+guard as the Opportunity Engine and Content Architect (§3.6, §17.3).
+
+## 69. MVP DATA SOURCING: MANUAL ENTRY, NOT LIVE APIS
+
+There is no company-database, web-search, or contact-enrichment API wired
+into this backend. Brand Discovery and Contact Discovery are, for now, manual
+entry (creator/operator types in what they know) plus LLM reasoning over
+that and existing Creator/Audience/Content/Research context — the same
+pattern already used for Research Signals, content ingestion, and
+performance metrics throughout this codebase. `Brand.source` distinguishes
+`creator_provided` from `agent_suggested`; agent-suggested facts carry
+capped confidence and must never be presented as verified. This is a
+deliberate, documented choice, not an oversight — a real enrichment API can
+be added later as an additional *source* without a schema change.
+
+`Brand` is creator-scoped, not a shared global table, for the same tenant-
+isolation reasons `Competitor` is (§46). Two creators tracking the same real
+company get two independent rows.
+
+## 70. OUTREACH: DRAFT-ONLY
+
+No email-sending provider is wired in. The Outreach Agent drafts; the
+creator sends the message themselves through their own email client and
+marks it sent in CreatorOS; brand replies are pasted in for extraction.
+`OutreachMessage.status` already models a `sent` state a future real-send
+integration would transition into automatically — the human step is a
+placeholder for automation, not a permanent design ceiling, but automatic
+sending is out of scope until a provider is deliberately wired in with
+proper reputation/compliance handling (bounces, unsubscribe, rate limits).
+
+LinkedIn (or any platform) automated outreach is out of scope permanently
+unless explicitly revisited — LinkedIn message automation violates their ToS
+and risks the creator's account. A LinkedIn profile URL may be stored as a
+reference field on `BrandContact`; CreatorOS never sends through it.
+
+## 71. BRAND OPPORTUNITY SCORING
+
+Same discipline as content Opportunity scoring (§20): component scores
+computed/proposed against given evidence, the combined score computed in
+code (never a model-invented aggregate), components always shown broken out
+in the UI. Only score a dimension when this system actually has a groundable
+data source for it — a scored dimension with nothing behind it is exactly
+the "opaque number" §20 already forbids. `contactability` in particular is
+always computed in code (does a verified/creator-provided contact exist on
+this brand?), never proposed by the model.
+
+## 72. COMMERCIAL LEARNING REUSES THE LEARNING ENGINE
+
+Commercial outcomes feed `StrategicLearning` (`app/domain/experiments`,
+§31/§72 of Part I) directly — a `category` value prefixed `commercial/...`
+alongside the existing `performance/...` convention, same clustering,
+`MIN_LEARNING_EVIDENCE` gate, and creator-override-preserving sync semantics
+already built for content-performance learnings. This is what makes the
+cross-loop connection real: a commercial-category learning like "AI-tool
+brands outperform generic SaaS for this creator" is readable by the Strategy
+Engine and Content Architect (content side) *and* by Brand Intelligence's
+`historical_category_fit` scoring (commercial side) with zero additional
+plumbing, because it's the same table. Do not create a second learning
+table for commercial outcomes.
+
+## 73. UI
+
+New nav items: `Brands`, `Outreach` (see `components/nav-sidebar.tsx`). A
+Creator Decision screen (brand response, structured extraction, commercial
+context, the decision itself) is the key premium surface — build it to the
+same "why is the system telling me this" evidentiary standard as every other
+recommendation surface in this product (§3.4, §16). The Home screen's "this
+week" view should eventually combine top content opportunities with
+top-confidence brand opportunities side by side (§16 of the original
+commercial spec) — do this once both loops have real data to show.
+
+## 74. WHAT NOT TO BUILD
+
+Not a generic influencer CRM. Not a marketplace. Not an autonomous sales
+bot. Not mass outbound. The commercial layer exists to connect Creator →
+Audience → Content → Market → Brands → Outreach → Response → Learning for
+one creator at a time, with that creator making every commercial decision.
+If a feature makes the system feel like "found 500 companies" instead of
+"knows which brands actually make sense for me," it's off-thesis — same
+test as §3.5's anti-virality-optimization rule, applied to brands instead of
+content.

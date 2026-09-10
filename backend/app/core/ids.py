@@ -39,6 +39,7 @@ PREFIXES = {
     "experiment": "exp",
     "experiment_result": "expr",
     "strategic_learning": "learn",
+    "commercial_profile": "cmprof",
     "agent_run": "run",
     "agent_message": "msg",
     "agent_tool_call": "tool",

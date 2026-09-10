@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.routes import (
     audience,
     calendar,
+    commercial,
     content,
     creators,
     health,
@@ -27,3 +28,4 @@ api_router.include_router(calendar.capacity_router)
 api_router.include_router(performance.router)
 api_router.include_router(performance.overview_router)
 api_router.include_router(learnings.router)
+api_router.include_router(commercial.router)

@@ -105,6 +105,7 @@ export interface CreatorStateSnapshot {
   current_research_signals: ResearchSignalSummary[];
   active_experiments: unknown[];
   strategic_learnings: StrategicLearningSummary[];
+  commercial_profile: CommercialProfileRead | null;
 }
 
 export interface AnalyzeCreatorResponse {
@@ -408,6 +409,35 @@ export interface PerformanceOverviewItem {
   format: string | null;
   platform: string | null;
   latest_snapshot: PerformanceSnapshotRead | null;
+}
+
+export interface CommercialProfileRead {
+  id: string;
+  version: number;
+  ideal_sponsor_categories: string[] | null;
+  prohibited_categories: string[] | null;
+  target_geographies: string[] | null;
+  preferred_deal_formats: string[] | null;
+  minimum_conditions: string | null;
+  exclusivity_constraints: string | null;
+  usage_rights_preferences: string | null;
+  sponsorship_goals: string | null;
+  revenue_goal: string | null;
+  brands_to_avoid: string[] | null;
+  confidence: number;
+}
+
+export interface CommercialProfileUpdate {
+  ideal_sponsor_categories?: string[];
+  prohibited_categories?: string[];
+  target_geographies?: string[];
+  preferred_deal_formats?: string[];
+  minimum_conditions?: string;
+  exclusivity_constraints?: string;
+  usage_rights_preferences?: string;
+  sponsorship_goals?: string;
+  revenue_goal?: string;
+  brands_to_avoid?: string[];
 }
 
 export interface LearningRead {

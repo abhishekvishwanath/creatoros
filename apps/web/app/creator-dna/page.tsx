@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { ContentLibraryCard } from "@/components/content-library-card";
+import { CommercialProfileCard } from "@/components/commercial-profile-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
 import { analyzeCreator, analyzeAudience, ApiError } from "@/lib/api";
@@ -272,6 +273,8 @@ export default function CreatorDnaPage() {
             )}
           </CardContent>
         </Card>
+
+        <CommercialProfileCard profile={state?.commercial_profile ?? null} onSaved={refetch} />
       </div>
     </div>
   );

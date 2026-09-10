@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.commercial import CommercialProfileRead
+
 
 class CreatorCreate(BaseModel):
     email: EmailStr
@@ -153,6 +155,7 @@ class CreatorStateSnapshot(BaseModel):
     current_research_signals: list[dict] = Field(default_factory=list)
     active_experiments: list[dict] = Field(default_factory=list)
     strategic_learnings: list[dict] = Field(default_factory=list)
+    commercial_profile: Optional[CommercialProfileRead] = None
 
 
 class AnalyzeCreatorResponse(BaseModel):

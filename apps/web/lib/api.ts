@@ -6,6 +6,8 @@ import type {
   BottleneckRead,
   CalendarEventRead,
   CapacityRead,
+  CommercialProfileRead,
+  CommercialProfileUpdate,
   ContentDetailRead,
   ContentItemCreate,
   ContentItemRead,
@@ -255,6 +257,17 @@ export function diagnosePerformance(creatorId: string, contentItemId: string) {
 
 export function getPerformanceOverview(creatorId: string) {
   return request<PerformanceOverviewItem[]>(`/creators/${creatorId}/performance/overview`);
+}
+
+export function getCommercialProfile(creatorId: string) {
+  return request<CommercialProfileRead | null>(`/creators/${creatorId}/commercial-profile`);
+}
+
+export function updateCommercialProfile(creatorId: string, payload: CommercialProfileUpdate) {
+  return request<CommercialProfileRead>(`/creators/${creatorId}/commercial-profile`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getLearnings(creatorId: string) {

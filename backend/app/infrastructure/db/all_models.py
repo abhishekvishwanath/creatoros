@@ -3,6 +3,7 @@ before Alembic autogenerate or create_all runs. Import this module (not the
 individual model modules) wherever full metadata is required."""
 
 from app.domain.agents import models as _agents_models  # noqa: F401
+from app.domain.commercial import models as _commercial_models  # noqa: F401
 from app.domain.content import models as _content_models  # noqa: F401
 from app.domain.creator import models as _creator_models  # noqa: F401
 from app.domain.experiments import models as _experiments_models  # noqa: F401

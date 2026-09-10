@@ -4,7 +4,7 @@ structured proposal, and this module is the "validator/state service" that
 turns it into a properly versioned row (CLAUDE.md §15: never overwrite
 important history)."""
 
-from typing import Optional, TypeVar
+from typing import Optional
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.shared.versioned_profile import apply_versioned_profile_update, get_current_versioned_profile
 
 # CLAUDE.md §5.2 lists "Operational Capacity" as its own creator state
 # domain, and §26 says capacity should be part of planning. It's stored as
@@ -26,70 +27,9 @@ from app.domain.creator.models import (
 # since it's a single creator-set number with no versioning need.
 WEEKLY_CAPACITY_KEY = "weekly_content_capacity"
 
-VersionedProfile = TypeVar("VersionedProfile", CreatorProfile, VoiceProfile, AudienceProfile)
-
-
-async def _get_current(db: AsyncSession, model_cls: type[VersionedProfile], creator_id: str) -> Optional[VersionedProfile]:
-    result = await db.execute(
-        select(model_cls)
-        .where(model_cls.creator_id == creator_id, model_cls.is_current.is_(True))
-        .order_by(model_cls.version.desc())
-    )
-    return result.scalars().first()
-
-
-async def _apply_versioned_update(
-    db: AsyncSession,
-    *,
-    model_cls: type[VersionedProfile],
-    id_prefix: str,
-    creator_id: str,
-    data: dict,
-    fields: tuple[str, ...],
-    confidence: float,
-    evidence_ids: list[str],
-    sample_size: Optional[int] = None,
-) -> VersionedProfile:
-    """Supersedes the current row with a new version rather than mutating it
-    in place (CLAUDE.md §15), merging `data` (a *partial* update) over the
-    current version's fields so an agent that only proposes some fields never
-    has the side effect of nulling out ones it didn't touch.
-
-    A field is treated as "not proposed" (falls back to the current value)
-    when it's either absent *or* explicitly null — not every caller's prompt
-    omits fields it can't infer the way positioning/voice do; the audience
-    profile prompt instead always emits all keys, using null for "can't
-    infer this," which would otherwise silently wipe a previously-known
-    field the moment one run's evidence doesn't happen to support it.
-    """
-    current = await _get_current(db, model_cls, creator_id)
-    next_version = (current.version + 1) if current else 1
-
-    if current is not None:
-        current.is_current = False
-
-    merged = {
-        field: data[field] if data.get(field) is not None else (getattr(current, field) if current else None)
-        for field in fields
-    }
-
-    new_row = model_cls(
-        id=generate_id(id_prefix),
-        creator_id=creator_id,
-        version=next_version,
-        is_current=True,
-        confidence=confidence,
-        evidence_ids=evidence_ids,
-        **({"sample_size": sample_size} if sample_size is not None else {}),
-        **merged,
-    )
-    db.add(new_row)
-    await db.flush()
-    return new_row
-
 
 async def get_current_creator_profile(db: AsyncSession, creator_id: str) -> Optional[CreatorProfile]:
-    return await _get_current(db, CreatorProfile, creator_id)
+    return await get_current_versioned_profile(db, CreatorProfile, creator_id)
 
 
 _PROFILE_FIELDS = (
@@ -111,7 +51,7 @@ async def apply_creator_profile_update(
     confidence: float,
     evidence_ids: list[str],
 ) -> CreatorProfile:
-    return await _apply_versioned_update(
+    return await apply_versioned_profile_update(
         db,
         model_cls=CreatorProfile,
         id_prefix="creator_profile",
@@ -139,7 +79,7 @@ _VOICE_FIELDS = (
 
 
 async def get_current_voice_profile(db: AsyncSession, creator_id: str) -> Optional[VoiceProfile]:
-    return await _get_current(db, VoiceProfile, creator_id)
+    return await get_current_versioned_profile(db, VoiceProfile, creator_id)
 
 
 async def apply_voice_profile_update(
@@ -150,7 +90,7 @@ async def apply_voice_profile_update(
     confidence: float,
     evidence_ids: list[str],
 ) -> VoiceProfile:
-    return await _apply_versioned_update(
+    return await apply_versioned_profile_update(
         db,
         model_cls=VoiceProfile,
         id_prefix="voice_profile",
@@ -173,7 +113,7 @@ _AUDIENCE_PROFILE_FIELDS = (
 
 
 async def get_current_audience_profile(db: AsyncSession, creator_id: str) -> Optional[AudienceProfile]:
-    return await _get_current(db, AudienceProfile, creator_id)
+    return await get_current_versioned_profile(db, AudienceProfile, creator_id)
 
 
 async def apply_audience_profile_update(
@@ -184,7 +124,7 @@ async def apply_audience_profile_update(
     confidence: float,
     evidence_ids: list[str],
 ) -> AudienceProfile:
-    return await _apply_versioned_update(
+    return await apply_versioned_profile_update(
         db,
         model_cls=AudienceProfile,
         id_prefix="audience_profile",
