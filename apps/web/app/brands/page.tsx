@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
+import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Building2, Users, Radar, Sparkles } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
@@ -136,13 +136,32 @@ function AddBrandForm({ onAdded }: { onAdded: (brand: BrandRead) => void }) {
   );
 }
 
-function AddContactForm({ brandId, onAdded }: { brandId: string; onAdded: (c: BrandContactRead) => void }) {
+function AddContactForm({
+  brandId,
+  onAdded,
+  prefillRole,
+}: {
+  brandId: string;
+  onAdded: (c: BrandContactRead) => void;
+  prefillRole?: string | null;
+}) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [email, setEmail] = useState("");
   const [profileUrl, setProfileUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // A click on one of the agent-suggested contact roles (Fit score card)
+  // prefills and refocuses this form instead of just being inert text the
+  // creator has to retype — the whole point of surfacing role suggestions
+  // is to make contact entry faster, not just informative.
+  useEffect(() => {
+    if (!prefillRole) return;
+    setRole(prefillRole);
+    nameInputRef.current?.focus();
+  }, [prefillRole]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -172,7 +191,13 @@ function AddContactForm({ brandId, onAdded }: { brandId: string; onAdded: (c: Br
 
   return (
     <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={inputClass} />
+      <input
+        ref={nameInputRef}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name"
+        className={inputClass}
+      />
       <input
         value={role}
         onChange={(e) => setRole(e.target.value)}
@@ -266,6 +291,7 @@ function BrandsPageInner() {
   const [scoring, setScoring] = useState(false);
   const [scoreError, setScoreError] = useState<string | null>(null);
   const [scoreWarnings, setScoreWarnings] = useState<string[]>([]);
+  const [contactRolePrefill, setContactRolePrefill] = useState<string | null>(null);
 
   const refetchBrands = useCallback(async () => {
     const session = getSession();
@@ -344,6 +370,7 @@ function BrandsPageInner() {
       setSignals([]);
       setScoreError(null);
       setScoreWarnings([]);
+      setContactRolePrefill(null);
       router.replace(id ? `/brands?brand=${id}` : "/brands");
     },
     [router]
@@ -560,9 +587,21 @@ function BrandsPageInner() {
                       )}
                       {currentOpportunity.reasons && <p className="text-sm text-ink">{currentOpportunity.reasons}</p>}
                       {currentOpportunity.suggested_contact_roles.length > 0 && (
-                        <p className="text-sm text-subtle">
-                          Worth looking for: {currentOpportunity.suggested_contact_roles.join(", ")}
-                        </p>
+                        <div className="space-y-1.5">
+                          <p className="text-sm text-subtle">Worth looking for — click to start a contact:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {currentOpportunity.suggested_contact_roles.map((role) => (
+                              <button
+                                key={role}
+                                type="button"
+                                onClick={() => setContactRolePrefill(role)}
+                                className="rounded-full border border-border px-2.5 py-1 text-xs text-ink hover:border-accent hover:text-accent"
+                              >
+                                + {role}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </>
                   ) : (
@@ -581,7 +620,14 @@ function BrandsPageInner() {
                   <CardDescription>Never invented — every contact here is what you entered.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <AddContactForm brandId={selected.id} onAdded={(c) => setContacts((prev) => [c, ...prev])} />
+                  <AddContactForm
+                    brandId={selected.id}
+                    onAdded={(c) => {
+                      setContacts((prev) => [c, ...prev]);
+                      setContactRolePrefill(null);
+                    }}
+                    prefillRole={contactRolePrefill}
+                  />
                   {contacts.length === 0 ? (
                     <p className="text-sm text-subtle">No contacts yet.</p>
                   ) : (
