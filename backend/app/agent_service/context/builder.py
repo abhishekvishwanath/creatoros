@@ -26,6 +26,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
+from app.domain.commercial.models import Brand, BrandContact, BrandSignal
 from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
@@ -309,4 +310,49 @@ async def build_performance_context(db: AsyncSession, content_item: ContentItem)
         "snapshot": snapshot,
         "baselines": baselines,
         "ratios": ratios,
+    }
+
+
+def compute_contactability(contacts: list[BrandContact]) -> float:
+    """Code-computed, never model-scored (CLAUDE.md §20, §71) — a brand's
+    contactability is a fact about what this creator has on file, not a
+    judgment call. 1.0 with any creator-verified-or-provided contact, 0.5
+    with only unverified ones (a name/email exists but isn't confirmed),
+    0.0 with none."""
+    if not contacts:
+        return 0.0
+    if any(c.verification_state in ("verified", "creator_provided") for c in contacts):
+        return 1.0
+    return 0.5
+
+
+async def build_brand_opportunity_context(db: AsyncSession, brand: Brand) -> dict:
+    """Task-specific context slice for the Brand Intelligence Agent's
+    scoring job (CLAUDE.md §71): the brand's own fields, the creator-
+    observed signals about it (evidence the score must cite), and its
+    contacts (for contactability, computed here in code, and for the
+    agent's suggested_contact_roles to avoid resuggesting a role already
+    covered)."""
+    signals_result = await db.execute(
+        select(BrandSignal).where(BrandSignal.brand_id == brand.id).order_by(desc(BrandSignal.created_at)).limit(20)
+    )
+    signals = [
+        {"id": s.id, "signal_type": s.signal_type, "summary": s.summary}
+        for s in signals_result.scalars().all()
+    ]
+
+    contacts_result = await db.execute(select(BrandContact).where(BrandContact.brand_id == brand.id))
+    contacts = list(contacts_result.scalars().all())
+
+    return {
+        "brand": {
+            "id": brand.id,
+            "name": brand.name,
+            "category": brand.category,
+            "description": brand.description,
+            "positioning": brand.positioning,
+        },
+        "signals": signals,
+        "existing_contact_roles": [c.role for c in contacts if c.role],
+        "contactability": compute_contactability(contacts),
     }

@@ -11,7 +11,7 @@ OutreachMessage land in later phases of the same build.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.ids import generate_id
@@ -122,3 +122,36 @@ class BrandSignal(Base, TimestampMixin, CreatorScopedMixin):
     observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     evidence_quality: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class BrandOpportunity(Base, TimestampMixin, CreatorScopedMixin):
+    """CLAUDE.md §71. One row per brand — re-scoring updates it in place
+    rather than versioning (unlike CreatorProfile etc.), since this is a
+    current-fit read, not an identity with history worth preserving. The
+    unique constraint on brand_id is the upsert's dedup key and the
+    backstop against a race between two concurrent score requests for the
+    same brand (same bug class as CalendarEvent in an earlier phase).
+
+    score_components always keeps `contactability` computed in code (does a
+    verified/creator-provided contact exist?), never proposed by the model —
+    same "no opaque model-invented number" discipline as content Opportunity
+    scoring (CLAUDE.md §20, §71)."""
+
+    __tablename__ = "brand_opportunities"
+    __table_args__ = (UniqueConstraint("brand_id", name="uq_brand_opportunities_brand"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("brand_opportunity"))
+    brand_id: Mapped[str] = mapped_column(String, ForeignKey("brands.id", ondelete="CASCADE"), index=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    score_components: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reasons: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_signal_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    suggested_contact_roles: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    # scored | qualified | archived
+    status: Mapped[str] = mapped_column(String, default="scored")
+    # True when the brand's category conflicts with a creator-stated
+    # prohibited category (CLAUDE.md §71) — persisted (not just returned as
+    # an ephemeral warning on the scoring response) so the Brand Radar and a
+    # revisited detail view still surface it without re-scoring.
+    prohibited_conflict: Mapped[bool] = mapped_column(Boolean, default=False)

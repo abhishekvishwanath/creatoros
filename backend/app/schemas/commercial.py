@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CommercialProfileRead(BaseModel):
@@ -115,6 +115,31 @@ class BrandSignalCreate(BaseModel):
     source_note: Optional[str] = None
     observed_at: Optional[datetime] = None
     evidence_quality: Optional[str] = "medium"
+
+
+class BrandOpportunityRead(BaseModel):
+    id: str
+    brand_id: str
+    score: Optional[float] = None
+    score_components: Optional[dict] = None
+    reasons: Optional[str] = None
+    evidence_signal_ids: list[str] = Field(default_factory=list)
+    suggested_contact_roles: list[str] = Field(default_factory=list)
+    confidence: float
+    status: str
+    prohibited_conflict: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class ScoreBrandOpportunityResponse(BaseModel):
+    opportunity: Optional[BrandOpportunityRead] = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class BrandRadarItem(BaseModel):
+    brand: BrandRead
+    opportunity: BrandOpportunityRead
 
 
 class BrandSignalRead(BaseModel):

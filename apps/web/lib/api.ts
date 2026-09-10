@@ -7,6 +7,7 @@ import type {
   BrandContactCreate,
   BrandContactRead,
   BrandCreate,
+  BrandRadarItem,
   BrandRead,
   BrandSignalCreate,
   BrandSignalRead,
@@ -38,6 +39,7 @@ import type {
   ReviewScriptResponse,
   ScheduleContentRequest,
   ScheduleContentResponse,
+  ScoreBrandOpportunityResponse,
   StrategyRead,
   StrategyStatus,
 } from "./types";
@@ -311,6 +313,16 @@ export function addBrandSignal(creatorId: string, brandId: string, payload: Bran
 
 export function listBrandSignals(creatorId: string, brandId: string) {
   return request<BrandSignalRead[]>(`/creators/${creatorId}/brands/${brandId}/signals`);
+}
+
+export function scoreBrandOpportunity(creatorId: string, brandId: string) {
+  return request<ScoreBrandOpportunityResponse>(`/creators/${creatorId}/brands/${brandId}/opportunities/score`, {
+    method: "POST",
+  });
+}
+
+export function listBrandRadar(creatorId: string) {
+  return request<BrandRadarItem[]>(`/creators/${creatorId}/brand-opportunities`);
 }
 
 export function getLearnings(creatorId: string) {

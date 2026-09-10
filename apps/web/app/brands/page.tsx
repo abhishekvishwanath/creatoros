@@ -2,11 +2,12 @@
 
 import { FormEvent, Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Building2, Users, Radar } from "lucide-react";
+import { Building2, Users, Radar, Sparkles } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
 import {
@@ -15,13 +16,27 @@ import {
   createBrand,
   getBrand,
   listBrandContacts,
+  listBrandRadar,
   listBrandSignals,
   listBrands,
+  scoreBrandOpportunity,
   ApiError,
 } from "@/lib/api";
-import type { BrandContactRead, BrandRead, BrandSignalRead } from "@/lib/types";
+import type { BrandContactRead, BrandRadarItem, BrandRead, BrandSignalRead } from "@/lib/types";
 
 const inputClass = "rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent";
+
+function scoreTone(score: number | null): "good" | "warn" | "neutral" {
+  if (score === null) return "neutral";
+  if (score >= 0.7) return "good";
+  if (score >= 0.4) return "warn";
+  return "neutral";
+}
+
+function ScoreBadge({ score }: { score: number | null }) {
+  if (score === null) return null;
+  return <Badge tone={scoreTone(score)}>{Math.round(score * 100)}/100</Badge>;
+}
 
 export default function BrandsPage() {
   return (
@@ -246,6 +261,11 @@ function BrandsPageInner() {
   const [contacts, setContacts] = useState<BrandContactRead[]>([]);
   const [signals, setSignals] = useState<BrandSignalRead[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [radar, setRadar] = useState<BrandRadarItem[]>([]);
+  const [loadingRadar, setLoadingRadar] = useState(true);
+  const [scoring, setScoring] = useState(false);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+  const [scoreWarnings, setScoreWarnings] = useState<string[]>([]);
 
   const refetchBrands = useCallback(async () => {
     const session = getSession();
@@ -261,9 +281,54 @@ function BrandsPageInner() {
     }
   }, []);
 
+  const refetchRadar = useCallback(async () => {
+    const session = getSession();
+    if (!session) {
+      setLoadingRadar(false);
+      return;
+    }
+    setLoadingRadar(true);
+    try {
+      setRadar(await listBrandRadar(session.creatorId));
+    } finally {
+      setLoadingRadar(false);
+    }
+  }, []);
+
   useEffect(() => {
     refetchBrands();
-  }, [refetchBrands]);
+    refetchRadar();
+  }, [refetchBrands, refetchRadar]);
+
+  const currentOpportunity = selected ? radar.find((r) => r.brand.id === selected.id)?.opportunity ?? null : null;
+
+  async function handleScore() {
+    const session = getSession();
+    if (!session || !selected) return;
+    setScoring(true);
+    setScoreError(null);
+    setScoreWarnings([]);
+    try {
+      const result = await scoreBrandOpportunity(session.creatorId, selected.id);
+      // Warnings (e.g. a prohibited-category conflict) matter just as much
+      // on a successful score as on a skipped one — surface them either way
+      // rather than only when scoring produced nothing.
+      setScoreWarnings(result.warnings);
+      if (result.opportunity) {
+        const opp = result.opportunity;
+        setRadar((prev) => {
+          const withoutThis = prev.filter((r) => r.brand.id !== selected.id);
+          return [...withoutThis, { brand: selected, opportunity: opp }].sort(
+            (a, b) => (b.opportunity.score ?? 0) - (a.opportunity.score ?? 0)
+          );
+        });
+      }
+    } catch (err) {
+      setScoreError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      setScoring(false);
+    }
+  }
 
   // Selecting only updates id/URL/cleared-state synchronously; fetching the
   // detail is a separate effect below keyed on selectedId — this is what
@@ -277,6 +342,8 @@ function BrandsPageInner() {
       setSelected(null);
       setContacts([]);
       setSignals([]);
+      setScoreError(null);
+      setScoreWarnings([]);
       router.replace(id ? `/brands?brand=${id}` : "/brands");
     },
     [router]
@@ -326,6 +393,50 @@ function BrandsPageInner() {
   return (
     <div>
       <PageHeader title="Brands" description="Brand Radar — which brands actually make sense for you, and why." />
+      <div className="p-8 pb-0">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Radar className="h-4 w-4 text-accent" /> Brand Radar
+            </CardTitle>
+            <CardDescription>Ranked by fit — score a brand from its detail panel below to add it here.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {loadingRadar ? (
+              <p className="p-4 text-sm text-subtle">Loading…</p>
+            ) : radar.length === 0 ? (
+              <div className="p-4">
+                <EmptyState
+                  icon={Radar}
+                  title="No scored brands yet"
+                  description="Add a brand below, then score it to see why it might (or might not) be a fit."
+                />
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {radar.map(({ brand, opportunity }) => (
+                  <li key={brand.id}>
+                    <button
+                      onClick={() => selectBrand(brand.id)}
+                      className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-zinc-50"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-ink">{brand.name}</p>
+                        <p className="text-xs text-subtle">{opportunity.reasons ?? brand.category ?? "—"}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {opportunity.prohibited_conflict && <Badge tone="bad">prohibited category</Badge>}
+                        <ScoreBadge score={opportunity.score} />
+                        <ConfidenceBadge confidence={opportunity.confidence} />
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      </div>
       <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-[1fr_1.4fr]">
         <div className="space-y-4">
           <AddBrandForm
@@ -406,6 +517,58 @@ function BrandsPageInner() {
                   {selected.description && <p>{selected.description}</p>}
                   {!selected.website && !selected.description && (
                     <p className="text-subtle">No further detail yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-accent" /> Fit score
+                      </CardTitle>
+                      <CardDescription>Why this brand might (or might not) be worth pursuing.</CardDescription>
+                    </div>
+                    <Button variant="secondary" onClick={handleScore} disabled={scoring}>
+                      {scoring ? "Scoring…" : currentOpportunity ? "Re-score" : "Score this brand"}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {scoreError && <p className="text-sm text-bad">{scoreError}</p>}
+                  {scoreWarnings.length > 0 && (
+                    <p className="text-sm text-warn">{scoreWarnings.join(" ")}</p>
+                  )}
+                  {currentOpportunity ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        {currentOpportunity.prohibited_conflict && (
+                          <Badge tone="bad">prohibited category</Badge>
+                        )}
+                        <ScoreBadge score={currentOpportunity.score} />
+                        <ConfidenceBadge confidence={currentOpportunity.confidence} />
+                      </div>
+                      {currentOpportunity.score_components && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(currentOpportunity.score_components).map(([key, value]) => (
+                            <Badge key={key} tone="neutral">
+                              {key.replace(/_/g, " ")}: {Math.round(value * 100)}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {currentOpportunity.reasons && <p className="text-sm text-ink">{currentOpportunity.reasons}</p>}
+                      {currentOpportunity.suggested_contact_roles.length > 0 && (
+                        <p className="text-sm text-subtle">
+                          Worth looking for: {currentOpportunity.suggested_contact_roles.join(", ")}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    !scoreError && scoreWarnings.length === 0 && (
+                      <p className="text-sm text-subtle">Not scored yet.</p>
+                    )
                   )}
                 </CardContent>
               </Card>

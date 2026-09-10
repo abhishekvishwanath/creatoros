@@ -10,14 +10,20 @@ only thing standing between one creator and another creator's contacts.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import DbSession, get_owned_creator
+from app.agent_service.agents.brand_intelligence import BrandIntelligenceAgent
+from app.agent_service.context.builder import build_brand_opportunity_context, build_creator_state_snapshot
+from app.agent_service.model_router.router import get_model_router
+from app.agent_service.orchestrator.orchestrator import Orchestrator
+from app.api.deps import DbSession, get_owned_creator, validate_or_502
 from app.domain.commercial.models import Brand, BrandContact, BrandSignal
 from app.domain.commercial.service import (
     add_brand_contact,
     add_brand_signal,
+    apply_brand_opportunity_score,
     create_brand,
     get_brand,
     list_brand_contacts,
+    list_brand_opportunities,
     list_brand_signals,
     list_brands,
 )
@@ -26,12 +32,16 @@ from app.schemas.commercial import (
     BrandContactCreate,
     BrandContactRead,
     BrandCreate,
+    BrandOpportunityRead,
+    BrandRadarItem,
     BrandRead,
     BrandSignalCreate,
     BrandSignalRead,
+    ScoreBrandOpportunityResponse,
 )
 
 router = APIRouter(prefix="/creators/{creator_id}/brands", tags=["brands"])
+radar_router = APIRouter(prefix="/creators/{creator_id}/brand-opportunities", tags=["brands"])
 
 
 async def _get_owned_brand(db: DbSession, creator: Creator, brand_id: str) -> Brand:
@@ -116,3 +126,62 @@ async def list_brand_signals_route(
 ) -> list[BrandSignal]:
     await _get_owned_brand(db, creator, brand_id)
     return await list_brand_signals(db, creator_id=creator.id, brand_id=brand_id)
+
+
+@router.post("/{brand_id}/opportunities/score", response_model=ScoreBrandOpportunityResponse)
+async def score_brand_opportunity_route(
+    brand_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> ScoreBrandOpportunityResponse:
+    brand = await _get_owned_brand(db, creator, brand_id)
+    brand_context = await build_brand_opportunity_context(db, brand)
+    creator_snapshot = await build_creator_state_snapshot(db, creator)
+
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    output = await orchestrator.run_agent(
+        agent=BrandIntelligenceAgent(),
+        creator_id=creator.id,
+        workflow_name="brand_opportunity_scoring",
+        context=creator_snapshot,
+        brand=brand_context["brand"],
+        signals=brand_context["signals"],
+        existing_contact_roles=brand_context["existing_contact_roles"],
+        contactability=brand_context["contactability"],
+    )
+
+    if output.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=output.summary + ("; " + "; ".join(output.warnings) if output.warnings else ""),
+        )
+
+    opportunity_read = None
+    for change in output.proposed_state_changes:
+        if change.get("type") == "brand_opportunity_score":
+            score_data = change["data"]
+            opportunity = await apply_brand_opportunity_score(
+                db,
+                creator_id=creator.id,
+                brand_id=brand_id,
+                score_components=score_data.get("score_components", {}),
+                contactability=brand_context["contactability"],
+                reasons=score_data.get("reasons", ""),
+                evidence_signal_ids=score_data.get("evidence_signal_ids", []),
+                suggested_contact_roles=score_data.get("suggested_contact_roles", []),
+                confidence=change.get("confidence", 0.0),
+                prohibited_conflict=score_data.get("prohibited_conflict", False),
+            )
+            opportunity_read = validate_or_502(BrandOpportunityRead, opportunity, label="Brand Intelligence")
+
+    await db.commit()
+    return ScoreBrandOpportunityResponse(opportunity=opportunity_read, warnings=output.warnings)
+
+
+@radar_router.get("", response_model=list[BrandRadarItem])
+async def list_brand_radar(
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> list[BrandRadarItem]:
+    rows = await list_brand_opportunities(db, creator_id=creator.id)
+    return [BrandRadarItem(brand=brand, opportunity=opportunity) for opportunity, brand in rows]

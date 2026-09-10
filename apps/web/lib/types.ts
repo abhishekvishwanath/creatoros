@@ -516,6 +516,29 @@ export interface BrandSignalRead {
   evidence_quality: string | null;
 }
 
+export interface BrandOpportunityRead {
+  id: string;
+  brand_id: string;
+  score: number | null;
+  score_components: Record<string, number> | null;
+  reasons: string | null;
+  evidence_signal_ids: string[];
+  suggested_contact_roles: string[];
+  confidence: number;
+  status: string;
+  prohibited_conflict: boolean;
+}
+
+export interface ScoreBrandOpportunityResponse {
+  opportunity: BrandOpportunityRead | null;
+  warnings: string[];
+}
+
+export interface BrandRadarItem {
+  brand: BrandRead;
+  opportunity: BrandOpportunityRead;
+}
+
 export interface LearningRead {
   id: string;
   statement: string;

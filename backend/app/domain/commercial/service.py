@@ -16,7 +16,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import generate_id
-from app.domain.commercial.models import Brand, BrandContact, BrandSignal, CommercialProfile
+from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal, CommercialProfile
 from app.domain.shared.versioned_profile import apply_versioned_profile_update, get_current_versioned_profile
 
 _PROFILE_FIELDS = (
@@ -146,3 +146,94 @@ async def list_brand_signals(db: AsyncSession, *, creator_id: str, brand_id: Opt
         query = query.where(BrandSignal.brand_id == brand_id)
     result = await db.execute(query.order_by(desc(BrandSignal.created_at)))
     return list(result.scalars().all())
+
+
+# --- Brand opportunity scoring (CLAUDE.md §71, Part II Phase 3) -------------
+
+# Canonical set of model-groundable dimensions (CLAUDE.md §71) — defined here,
+# not in the agent, so the domain layer (not the agent layer) owns what
+# "a complete score" means; brand_intelligence.py imports this rather than
+# keeping its own copy.
+BRAND_OPPORTUNITY_SCORE_DIMENSIONS = (
+    "audience_fit",
+    "creator_fit",
+    "product_content_fit",
+    "timing_signal",
+    "historical_category_fit",
+)
+_NEUTRAL_SCORE = 0.5
+
+
+async def get_brand_opportunity(db: AsyncSession, *, brand_id: str) -> Optional[BrandOpportunity]:
+    result = await db.execute(select(BrandOpportunity).where(BrandOpportunity.brand_id == brand_id))
+    return result.scalar_one_or_none()
+
+
+async def apply_brand_opportunity_score(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    brand_id: str,
+    score_components: dict,
+    contactability: float,
+    reasons: str,
+    evidence_signal_ids: list[str],
+    suggested_contact_roles: list[str],
+    confidence: float,
+    prohibited_conflict: bool = False,
+) -> BrandOpportunity:
+    """Upserts by brand_id (CLAUDE.md §71) — a re-score reflects this
+    brand's current best-known fit, not a point-in-time snapshot worth
+    versioning the way Creator DNA is (CLAUDE.md §15's versioning rule
+    applies to identity/history; a brand's fit score is neither).
+
+    `score_components` may be missing a dimension the agent's grounding
+    dropped (out of range, non-numeric, or absent from the model's
+    response — see brand_intelligence.py). The combined `score` is always
+    averaged over the full fixed dimension set (a missing one counts as a
+    neutral 0.5), so two brands are comparable purely on fit rather than on
+    how many dimensions each one happened to survive grounding — a brand
+    scored on 3 dimensions must not be able to out-rank one honestly scored
+    on all 5 just by having fewer numbers to average. `score_components` as
+    *stored/displayed* keeps only what was actually grounded (plus the
+    always-code-computed `contactability`), preserving CLAUDE.md §20's
+    "never show an opaque/invented number" rule for the breakdown shown in
+    the UI — the neutral fill-in is used for score math only, never
+    presented as if the model scored it.
+    """
+    complete_dimensions = {
+        dim: score_components.get(dim, _NEUTRAL_SCORE) for dim in BRAND_OPPORTUNITY_SCORE_DIMENSIONS
+    }
+    score = round((sum(complete_dimensions.values()) + contactability) / (len(complete_dimensions) + 1), 3)
+    stored_components = {**score_components, "contactability": contactability}
+
+    opportunity = await get_brand_opportunity(db, brand_id=brand_id)
+    if opportunity is None:
+        opportunity = BrandOpportunity(
+            id=generate_id("brand_opportunity"),
+            creator_id=creator_id,
+            brand_id=brand_id,
+        )
+        db.add(opportunity)
+
+    opportunity.score = score
+    opportunity.score_components = stored_components
+    opportunity.reasons = reasons
+    opportunity.evidence_signal_ids = evidence_signal_ids
+    opportunity.suggested_contact_roles = suggested_contact_roles
+    opportunity.confidence = confidence
+    opportunity.prohibited_conflict = prohibited_conflict
+    await db.flush()
+    return opportunity
+
+
+async def list_brand_opportunities(db: AsyncSession, *, creator_id: str) -> list[tuple[BrandOpportunity, Brand]]:
+    """Ranked for the Brand Radar UI — highest score first. Joined with
+    Brand so the UI doesn't need a second round trip per card."""
+    result = await db.execute(
+        select(BrandOpportunity, Brand)
+        .join(Brand, Brand.id == BrandOpportunity.brand_id)
+        .where(BrandOpportunity.creator_id == creator_id)
+        .order_by(desc(BrandOpportunity.score))
+    )
+    return [(opp, brand) for opp, brand in result.all()]
