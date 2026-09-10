@@ -4,6 +4,12 @@ import type {
   AudienceSignalCreate,
   AudienceSignalRead,
   BottleneckRead,
+  BrandContactCreate,
+  BrandContactRead,
+  BrandCreate,
+  BrandRead,
+  BrandSignalCreate,
+  BrandSignalRead,
   CalendarEventRead,
   CapacityRead,
   CommercialProfileRead,
@@ -268,6 +274,43 @@ export function updateCommercialProfile(creatorId: string, payload: CommercialPr
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export function createBrand(creatorId: string, payload: BrandCreate) {
+  return request<BrandRead>(`/creators/${creatorId}/brands`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listBrands(creatorId: string) {
+  return request<BrandRead[]>(`/creators/${creatorId}/brands`);
+}
+
+export function getBrand(creatorId: string, brandId: string) {
+  return request<BrandRead>(`/creators/${creatorId}/brands/${brandId}`);
+}
+
+export function addBrandContact(creatorId: string, brandId: string, payload: BrandContactCreate) {
+  return request<BrandContactRead>(`/creators/${creatorId}/brands/${brandId}/contacts`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listBrandContacts(creatorId: string, brandId: string) {
+  return request<BrandContactRead[]>(`/creators/${creatorId}/brands/${brandId}/contacts`);
+}
+
+export function addBrandSignal(creatorId: string, brandId: string, payload: BrandSignalCreate) {
+  return request<BrandSignalRead>(`/creators/${creatorId}/brands/${brandId}/signals`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listBrandSignals(creatorId: string, brandId: string) {
+  return request<BrandSignalRead[]>(`/creators/${creatorId}/brands/${brandId}/signals`);
 }
 
 export function getLearnings(creatorId: string) {

@@ -440,6 +440,82 @@ export interface CommercialProfileUpdate {
   brands_to_avoid?: string[];
 }
 
+export interface BrandCreate {
+  name: string;
+  website?: string;
+  category?: string;
+  subcategory?: string;
+  description?: string;
+  geography?: string;
+  target_customer?: string[];
+  products?: string[];
+  positioning?: string;
+  competitors?: string[];
+}
+
+export interface BrandRead {
+  id: string;
+  name: string;
+  website: string | null;
+  category: string | null;
+  subcategory: string | null;
+  description: string | null;
+  geography: string | null;
+  target_customer: string[] | null;
+  products: string[] | null;
+  positioning: string | null;
+  competitors: string[] | null;
+  source: string;
+  confidence: number;
+  status: string;
+  created_at: string;
+}
+
+export interface BrandContactCreate {
+  name?: string;
+  role?: string;
+  department?: string;
+  email?: string;
+  profile_url?: string;
+  source?: string;
+  verification_state?: string;
+}
+
+export interface BrandContactRead {
+  id: string;
+  brand_id: string;
+  name: string | null;
+  role: string | null;
+  department: string | null;
+  email: string | null;
+  profile_url: string | null;
+  source: string | null;
+  verification_state: string;
+  confidence: number;
+  last_verified_at: string | null;
+}
+
+export interface BrandSignalCreate {
+  signal_type?: string;
+  summary: string;
+  source_url?: string;
+  source_note?: string;
+  observed_at?: string;
+  evidence_quality?: string;
+}
+
+export interface BrandSignalRead {
+  id: string;
+  brand_id: string | null;
+  signal_type: string | null;
+  summary: string;
+  source_url: string | null;
+  source_note: string | null;
+  observed_at: string | null;
+  retrieved_at: string;
+  evidence_quality: string | null;
+}
+
 export interface LearningRead {
   id: string;
   statement: string;

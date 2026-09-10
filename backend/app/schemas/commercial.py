@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -46,3 +47,85 @@ class CommercialProfileUpdate(BaseModel):
     sponsorship_goals: Optional[str] = None
     revenue_goal: Optional[str] = None
     brands_to_avoid: Optional[list[str]] = None
+
+
+class BrandCreate(BaseModel):
+    name: str
+    website: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    description: Optional[str] = None
+    geography: Optional[str] = None
+    target_customer: Optional[list[str]] = None
+    products: Optional[list[str]] = None
+    positioning: Optional[str] = None
+    competitors: Optional[list[str]] = None
+
+
+class BrandRead(BaseModel):
+    id: str
+    name: str
+    website: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    description: Optional[str] = None
+    geography: Optional[str] = None
+    target_customer: Optional[list[str]] = None
+    products: Optional[list[str]] = None
+    positioning: Optional[str] = None
+    competitors: Optional[list[str]] = None
+    source: str
+    confidence: float
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BrandContactCreate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    department: Optional[str] = None
+    email: Optional[str] = None
+    profile_url: Optional[str] = None
+    source: Optional[str] = None
+    verification_state: str = "unverified"
+
+
+class BrandContactRead(BaseModel):
+    id: str
+    brand_id: str
+    name: Optional[str] = None
+    role: Optional[str] = None
+    department: Optional[str] = None
+    email: Optional[str] = None
+    profile_url: Optional[str] = None
+    source: Optional[str] = None
+    verification_state: str
+    confidence: float
+    last_verified_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class BrandSignalCreate(BaseModel):
+    signal_type: Optional[str] = None
+    summary: str
+    source_url: Optional[str] = None
+    source_note: Optional[str] = None
+    observed_at: Optional[datetime] = None
+    evidence_quality: Optional[str] = "medium"
+
+
+class BrandSignalRead(BaseModel):
+    id: str
+    brand_id: Optional[str] = None
+    signal_type: Optional[str] = None
+    summary: str
+    source_url: Optional[str] = None
+    source_note: Optional[str] = None
+    observed_at: Optional[datetime] = None
+    retrieved_at: datetime
+    evidence_quality: Optional[str] = None
+
+    model_config = {"from_attributes": True}
