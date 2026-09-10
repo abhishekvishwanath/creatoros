@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ids import generate_id
+from app.domain.commercial.models import Brand, BrandOpportunity, OutreachThread
 from app.domain.content.models import ContentItem
 from app.domain.experiments.models import StrategicLearning
 from app.domain.performance.models import PerformanceSnapshot
@@ -100,20 +101,23 @@ async def collect_learning_candidates(db: AsyncSession, *, creator_id: str) -> l
                 {
                     "direction": direction,
                     "label": label,
-                    "content_item_ids": set(),
+                    # Named to match the commercial-loop collector's
+                    # equivalent field — both feed the same shared upsert
+                    # engine below (_upsert_learning_clusters).
+                    "evidence_ids": set(),
                     "formats": set(),
                     "factor_confidences": [],
                     "first_observed_at": snapshot.captured_at,
                 },
             )
-            cluster["content_item_ids"].add(snapshot.content_item_id)
+            cluster["evidence_ids"].add(snapshot.content_item_id)
             cluster["formats"].add(content_format)
             cluster["factor_confidences"].append(factor.get("confidence", "low"))
             cluster["label"] = label  # keep the most recently seen phrasing
             if snapshot.captured_at < cluster["first_observed_at"]:
                 cluster["first_observed_at"] = snapshot.captured_at
 
-    return [c for c in clusters.values() if len(c["content_item_ids"]) >= MIN_LEARNING_EVIDENCE]
+    return [c for c in clusters.values() if len(c["evidence_ids"]) >= MIN_LEARNING_EVIDENCE]
 
 
 def _category_key(direction: str, factor_norm: str) -> str:
@@ -128,40 +132,39 @@ def _statement(direction: str, label: str, count: int) -> str:
     return f"{label.strip().capitalize()} appears associated with {verb} performance (seen across {count} posts)."
 
 
-async def sync_learnings(db: AsyncSession, *, creator_id: str) -> list[StrategicLearning]:
-    """Idempotent: recomputes candidates from current diagnosis history and
-    upserts one StrategicLearning per qualifying cluster. Never deletes —
-    evidence for a factor doesn't disappear once observed, it can only grow,
-    so `status` stays creator/human-editable rather than this silently
-    retracting things. Symmetrically, it also never *resurrects* a learning
-    the creator already retracted (or a future flow superseded): once a row
-    exists for a category with a non-"active" status, re-syncing skips it
-    rather than overwriting the creator's override (CLAUDE.md §3.2)."""
-    candidates = await collect_learning_candidates(db, creator_id=creator_id)
+async def _upsert_learning_clusters(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    candidates: list[dict],
+    category_fn,
+    statement_fn,
+    confidence_fn,
+    scope_fn,
+) -> list[StrategicLearning]:
+    """Shared upsert-by-category engine behind both sync_learnings and
+    sync_commercial_learnings (CLAUDE.md §3.7 — the two loops' clustering
+    logic differs, but the persistence discipline is identical and belongs
+    in exactly one place): idempotent, never deletes, and never
+    *resurrects* a learning the creator already retracted (or a future flow
+    superseded) — once a row exists for a category with a non-"active"
+    status, re-syncing skips it rather than overwriting the creator's
+    override (CLAUDE.md §3.2). Each `*_fn` derives one field from a
+    cluster dict — the two callers differ only in these, not in the
+    upsert/override-preservation logic itself."""
     if not candidates:
         return []
 
-    existing_result = await db.execute(
-        select(StrategicLearning).where(StrategicLearning.creator_id == creator_id)
-    )
+    existing_result = await db.execute(select(StrategicLearning).where(StrategicLearning.creator_id == creator_id))
     existing_by_category = {row.category: row for row in existing_result.scalars().all()}
 
     now = datetime.now(timezone.utc)
     touched: list[StrategicLearning] = []
     for cluster in candidates:
-        factor_norm = _normalize_factor(cluster["label"])
-        category = _category_key(cluster["direction"], factor_norm)
-        count = len(cluster["content_item_ids"])
-        confidence = _evidence_confidence(count, cluster["factor_confidences"])
-        scope = "format-specific" if len(cluster["formats"]) == 1 else "creator-wide"
-        statement = _statement(cluster["direction"], cluster["label"], count)
+        category = category_fn(cluster)
 
         learning = existing_by_category.get(category)
         if learning is not None and learning.status != "active":
-            # The creator already retracted (or a future flow superseded)
-            # this exact learning — a fresh sync must never silently
-            # resurrect an override they made (CLAUDE.md §3.2: the creator
-            # remains in control). Leave it untouched and out of `touched`.
             continue
         if learning is None:
             learning = StrategicLearning(
@@ -172,15 +175,119 @@ async def sync_learnings(db: AsyncSession, *, creator_id: str) -> list[Strategic
                 status="active",
             )
             db.add(learning)
-        learning.statement = statement
-        learning.evidence_ids = sorted(cluster["content_item_ids"])
-        learning.confidence = confidence
-        learning.scope = scope
+        learning.statement = statement_fn(cluster)
+        learning.evidence_ids = sorted(cluster["evidence_ids"])
+        learning.confidence = confidence_fn(cluster)
+        learning.scope = scope_fn(cluster)
         learning.last_validated_at = now
         touched.append(learning)
 
     await db.flush()
     return touched
+
+
+async def sync_learnings(db: AsyncSession, *, creator_id: str) -> list[StrategicLearning]:
+    """Idempotent: recomputes candidates from current diagnosis history and
+    upserts one StrategicLearning per qualifying cluster (see
+    _upsert_learning_clusters for the shared persistence discipline)."""
+    candidates = await collect_learning_candidates(db, creator_id=creator_id)
+    return await _upsert_learning_clusters(
+        db,
+        creator_id=creator_id,
+        candidates=candidates,
+        category_fn=lambda c: _category_key(c["direction"], _normalize_factor(c["label"])),
+        statement_fn=lambda c: _statement(c["direction"], c["label"], len(c["evidence_ids"])),
+        confidence_fn=lambda c: _evidence_confidence(len(c["evidence_ids"]), c["factor_confidences"]),
+        scope_fn=lambda c: "format-specific" if len(c["formats"]) == 1 else "creator-wide",
+    )
+
+
+# --- Commercial learning (CLAUDE.md Part II §72, Phase 8) -------------------
+# Same table, same engine, deliberately reused rather than duplicated
+# (CLAUDE.md §3.7) — this is what makes a finding like "AI-tool brands
+# outperform generic SaaS for this creator" readable by both
+# StrategyEngineAgent/ContentArchitectAgent (content side, already wired to
+# read context.strategic_learnings) and BrandIntelligenceAgent's
+# historical_category_fit scoring dimension (commercial side, already
+# reading the same field) with zero new plumbing on either side.
+
+# Only outcomes with a clear enough directional signal are counted at all —
+# an archived thread could mean "brand said no", "creator got busy", or
+# "no longer relevant" with no way to tell which, so (like a performance
+# ratio within +/-15% of baseline) it contributes nothing either way
+# (CLAUDE.md §29: don't overclaim from an ambiguous signal).
+_OUTCOME_DIRECTION = {"deal_confirmed": "positive", "declined_by_creator": "negative"}
+
+
+def outcome_has_learning_signal(outcome: Optional[str]) -> bool:
+    """Lets a caller (e.g. the decision route) skip triggering a sync
+    entirely for an outcome that can never contribute a cluster — same
+    source of truth as _OUTCOME_DIRECTION, exposed instead of duplicated."""
+    return outcome in _OUTCOME_DIRECTION
+
+
+async def collect_commercial_learning_candidates(db: AsyncSession, *, creator_id: str) -> list[dict]:
+    """Mirrors collect_learning_candidates for the commercial loop: clusters
+    resolved OutreachThread outcomes by brand category, and returns only
+    clusters with enough distinct-thread corroboration (MIN_LEARNING_EVIDENCE)
+    to be worth persisting."""
+    result = await db.execute(
+        select(OutreachThread, Brand.category)
+        .join(BrandOpportunity, BrandOpportunity.id == OutreachThread.brand_opportunity_id)
+        .join(Brand, Brand.id == BrandOpportunity.brand_id)
+        .where(OutreachThread.creator_id == creator_id, OutreachThread.outcome.isnot(None))
+    )
+
+    clusters: dict[tuple[str, str], dict] = {}
+    for thread, category in result.all():
+        if not category:
+            continue
+        direction = _OUTCOME_DIRECTION.get(thread.outcome)
+        if direction is None:
+            continue
+        key = (_normalize_factor(category), direction)
+        observed_at = thread.decided_at or thread.created_at
+        cluster = clusters.setdefault(
+            key,
+            {"direction": direction, "label": category, "evidence_ids": set(), "first_observed_at": observed_at},
+        )
+        cluster["evidence_ids"].add(thread.id)
+        cluster["label"] = category  # keep the most recently seen phrasing
+        if observed_at < cluster["first_observed_at"]:
+            cluster["first_observed_at"] = observed_at
+
+    return [c for c in clusters.values() if len(c["evidence_ids"]) >= MIN_LEARNING_EVIDENCE]
+
+
+def _commercial_category_key(direction: str, category_norm: str) -> str:
+    """Parallel to _category_key's `performance/...` convention — the
+    `commercial/...` prefix is what lets the Analytics learnings list (and
+    any future filter) distinguish the two loops while sharing one table."""
+    return f"commercial/{direction}/{category_norm.replace(' ', '_')}"
+
+
+def _commercial_statement(direction: str, label: str, count: int) -> str:
+    verb = "successful" if direction == "positive" else "declined"
+    return f"{label.strip().capitalize()} brand partnerships appear associated with {verb} outcomes (seen across {count} deals)."
+
+
+async def sync_commercial_learnings(db: AsyncSession, *, creator_id: str) -> list[StrategicLearning]:
+    """Commercial-loop analog of sync_learnings (see _upsert_learning_clusters
+    for the shared persistence discipline). Confidence here has no per-item
+    factor-confidence component to average in (unlike performance learnings'
+    diagnosis-reported per-factor read) — it's evidence-count only, same
+    discipline as BaseAgent._coverage_confidence elsewhere: more
+    corroborating deals is the only thing that earns higher confidence."""
+    candidates = await collect_commercial_learning_candidates(db, creator_id=creator_id)
+    return await _upsert_learning_clusters(
+        db,
+        creator_id=creator_id,
+        candidates=candidates,
+        category_fn=lambda c: _commercial_category_key(c["direction"], _normalize_factor(c["label"])),
+        statement_fn=lambda c: _commercial_statement(c["direction"], c["label"], len(c["evidence_ids"])),
+        confidence_fn=lambda c: _EVIDENCE_COUNT_WEIGHT.get(len(c["evidence_ids"]), _EVIDENCE_COUNT_WEIGHT_CAP),
+        scope_fn=lambda c: "creator-wide",
+    )
 
 
 async def list_learnings(

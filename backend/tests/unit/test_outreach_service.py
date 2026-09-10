@@ -404,3 +404,39 @@ async def test_record_creator_decision_rejects_unrecognized_decision():
     async with AsyncSessionLocal() as session:
         with pytest.raises(ValueError, match="Unrecognized decision"):
             await record_creator_decision(session, thread_id=thread_id, decision="sign_the_contract")
+
+
+async def test_record_creator_decision_rejects_re_deciding_a_resolved_thread():
+    """Once resolved, a thread can never be re-decided — a commercial
+    learning's evidence_ids/statement are derived from resolved outcomes,
+    and silently flipping one later would invalidate already-persisted
+    evidence with no corresponding correction (CLAUDE.md §16)."""
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        await record_creator_decision(session, thread_id=thread_id, decision="accept")
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(ValueError, match="already resolved"):
+            await record_creator_decision(session, thread_id=thread_id, decision="decline")
+
+
+async def test_record_creator_decision_allows_updating_an_unresolved_decision():
+    """negotiate/need_more_info set no outcome, so the thread stays open —
+    the creator should be able to update their stated intent, or move to a
+    real resolution, without hitting the re-decide guard."""
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        await record_creator_decision(session, thread_id=thread_id, decision="negotiate")
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        thread = await record_creator_decision(session, thread_id=thread_id, decision="accept")
+        await session.commit()
+
+    assert thread.status == "won"
+    assert thread.creator_decision == "accept"

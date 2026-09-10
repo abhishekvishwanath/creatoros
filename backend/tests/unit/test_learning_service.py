@@ -88,7 +88,7 @@ async def test_collect_candidates_clusters_matching_factor_across_posts():
 
     assert len(candidates) == 1
     assert candidates[0]["direction"] == "positive"
-    assert len(candidates[0]["content_item_ids"]) == 2
+    assert len(candidates[0]["evidence_ids"]) == 2
 
 
 async def test_collect_candidates_ignores_posts_within_baseline_noise_band():

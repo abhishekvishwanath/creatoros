@@ -492,13 +492,23 @@ async def record_creator_decision(
     db: AsyncSession, *, thread_id: str, decision: str, note: Optional[str] = None
 ) -> OutreachThread:
     """Raises ValueError (caller maps to 409/400) on an unrecognized
-    decision — same "surface, don't vanish" convention as the message
-    status gates above."""
+    decision, or on a thread that's already resolved — same "surface,
+    don't vanish" convention as the message status gates above. Once a
+    thread has a terminal outcome (won/lost/archived), it can never be
+    re-decided: a commercial-category StrategicLearning's evidence_ids and
+    statement are derived from resolved outcomes (Part II §72), and
+    letting a resolved thread flip outcome later would silently invalidate
+    a learning's already-persisted evidence without any corresponding
+    correction — CLAUDE.md §16's evidence-traceability guarantee would
+    otherwise quietly break. A still-open decision (negotiate/
+    need_more_info) can be updated freely, since neither sets an outcome."""
     if decision not in CREATOR_DECISIONS:
         raise ValueError(f"Unrecognized decision {decision!r} (expected one of {CREATOR_DECISIONS}).")
     thread = await db.get(OutreachThread, thread_id)
     if thread is None:
         raise ValueError("Outreach thread not found.")
+    if thread.outcome is not None:
+        raise ValueError(f"This thread is already resolved (outcome={thread.outcome!r}) and cannot be re-decided.")
 
     new_status, outcome = _DECISION_EFFECTS[decision]
     thread.creator_decision = decision

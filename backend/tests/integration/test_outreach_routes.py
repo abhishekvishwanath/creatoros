@@ -336,6 +336,23 @@ async def test_record_decision_rejects_unrecognized_value(client):
     assert resp.status_code == 400
 
 
+async def test_record_decision_rejects_re_deciding_a_resolved_thread(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route23@example.com", name="O23")
+    headers = {"X-Debug-User-Id": user_id}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_id, headers)
+    thread_id = await _create_sent_thread(client, creator_id, opportunity_id, headers)
+
+    resp = await client.patch(
+        f"/creators/{creator_id}/outreach/{thread_id}/decision", json={"decision": "accept"}, headers=headers
+    )
+    assert resp.status_code == 200
+
+    resp = await client.patch(
+        f"/creators/{creator_id}/outreach/{thread_id}/decision", json={"decision": "decline"}, headers=headers
+    )
+    assert resp.status_code == 400
+
+
 async def test_record_decision_unknown_thread_is_404(client):
     creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route18@example.com", name="O18")
     headers = {"X-Debug-User-Id": user_id}
@@ -361,3 +378,55 @@ async def test_reply_and_decision_routes_are_scoped_to_owning_creator(client):
         f"/creators/{creator_b}/outreach/{thread_id}/decision", json={"decision": "accept"}, headers=headers_b
     )
     assert resp.status_code == 404
+
+
+async def _create_sent_thread_for_category(client, creator_id, headers, brand_name, category):
+    from app.domain.commercial.service import apply_brand_opportunity_score
+    from app.infrastructure.db.session import AsyncSessionLocal
+
+    brand_id = (
+        await client.post(f"/creators/{creator_id}/brands", json={"name": brand_name, "category": category}, headers=headers)
+    ).json()["id"]
+
+    async with AsyncSessionLocal() as session:
+        opportunity = await apply_brand_opportunity_score(
+            session,
+            creator_id=creator_id,
+            brand_id=brand_id,
+            score_components={"audience_fit": 0.5, "creator_fit": 0.5, "product_content_fit": 0.5, "timing_signal": 0.5, "historical_category_fit": 0.5},
+            contactability=0.5,
+            reasons="",
+            evidence_signal_ids=[],
+            suggested_contact_roles=[],
+            confidence=0.5,
+        )
+        await session.commit()
+        opportunity_id = opportunity.id
+
+    return await _create_sent_thread(client, creator_id, opportunity_id, headers)
+
+
+async def test_record_decision_auto_triggers_commercial_learning_sync(client):
+    """CLAUDE.md Part II §72: resolving a deal is the trigger point — after
+    the second 'accept' for the same brand category, a commercial-category
+    StrategicLearning row should exist and be readable via GET /learnings,
+    the same table/endpoint the content loop already uses."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route22@example.com", name="O22")
+    headers = {"X-Debug-User-Id": user_id}
+
+    thread_1 = await _create_sent_thread_for_category(client, creator_id, headers, "Brand A", "AI productivity tools")
+    thread_2 = await _create_sent_thread_for_category(client, creator_id, headers, "Brand B", "AI productivity tools")
+
+    resp = await client.patch(f"/creators/{creator_id}/outreach/{thread_1}/decision", json={"decision": "accept"}, headers=headers)
+    assert resp.status_code == 200
+    # Only one resolved deal so far — not enough evidence yet.
+    learnings = (await client.get(f"/creators/{creator_id}/learnings", headers=headers)).json()
+    assert not any(l["category"] and l["category"].startswith("commercial/") for l in learnings)
+
+    resp = await client.patch(f"/creators/{creator_id}/outreach/{thread_2}/decision", json={"decision": "accept"}, headers=headers)
+    assert resp.status_code == 200
+
+    learnings = (await client.get(f"/creators/{creator_id}/learnings", headers=headers)).json()
+    commercial = [l for l in learnings if l["category"] and l["category"].startswith("commercial/positive/")]
+    assert len(commercial) == 1
+    assert len(commercial[0]["evidence_ids"]) == 2

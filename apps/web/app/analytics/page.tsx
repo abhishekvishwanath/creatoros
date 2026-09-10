@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { BarChart3, Lightbulb } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
@@ -33,6 +33,15 @@ function DiagnosisSummary({ snapshot }: { snapshot: PerformanceOverviewItem["lat
   return <p className="mt-1 text-sm text-subtle">{summary}</p>;
 }
 
+// Both loops write into the same StrategicLearning table (CLAUDE.md Part
+// II §72) — category is the only thing that distinguishes a content
+// finding ("performance/...") from a commercial one ("commercial/...").
+type LearningFilter = "all" | "content" | "commercial";
+
+function isCommercialLearning(learning: LearningRead): boolean {
+  return (learning.category ?? "").startsWith("commercial/");
+}
+
 export default function AnalyticsPage() {
   const [overview, setOverview] = useState<PerformanceOverviewItem[]>([]);
   const [learnings, setLearnings] = useState<LearningRead[]>([]);
@@ -40,6 +49,7 @@ export default function AnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [busyLearningId, setBusyLearningId] = useState<string | null>(null);
+  const [learningFilter, setLearningFilter] = useState<LearningFilter>("all");
 
   const refetch = useCallback(async () => {
     const session = getSession();
@@ -93,6 +103,22 @@ export default function AnalyticsPage() {
       setBusyLearningId(null);
     }
   }
+
+  const hasCommercialLearnings = useMemo(() => learnings.some(isCommercialLearning), [learnings]);
+  const visibleLearnings = useMemo(() => {
+    if (learningFilter === "all") return learnings;
+    return learnings.filter((l) => isCommercialLearning(l) === (learningFilter === "commercial"));
+  }, [learnings, learningFilter]);
+
+  // If retracting the last learning in the current filter empties it out,
+  // fall back to "all" instead of leaving a blank list with no visible way
+  // back (the filter pills themselves disappear once hasCommercialLearnings
+  // goes false, so "commercial"/"content" could otherwise become a dead end).
+  useEffect(() => {
+    if (learningFilter !== "all" && learnings.length > 0 && visibleLearnings.length === 0) {
+      setLearningFilter("all");
+    }
+  }, [learningFilter, learnings, visibleLearnings]);
 
   return (
     <div>
@@ -160,34 +186,59 @@ export default function AnalyticsPage() {
                 <EmptyState
                   icon={Lightbulb}
                   title="No learnings yet"
-                  description="Once at least two diagnosed posts point to the same factor (e.g. a hook type or pacing pattern), it becomes a persistent learning here — and future strategy and briefs will take it into account."
+                  description="Once at least two diagnosed posts point to the same factor (e.g. a hook type or pacing pattern), or two resolved deals point to the same brand category, it becomes a persistent learning here — and future strategy, briefs, and brand scoring will take it into account."
                 />
               ) : (
-                <Card>
-                  <CardContent className="p-0">
-                    <ul className="divide-y divide-border">
-                      {learnings.map((learning) => (
-                        <li key={learning.id} className="p-4 flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm text-ink">{learning.statement}</p>
-                            <div className="mt-1 flex items-center gap-2">
-                              <ConfidenceBadge confidence={learning.confidence} />
-                              <Badge tone="neutral">{learning.scope}</Badge>
-                              <Badge tone="neutral">{learning.evidence_ids.length} posts</Badge>
-                            </div>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            onClick={() => handleRetract(learning.id)}
-                            disabled={busyLearningId === learning.id}
-                          >
-                            Not accurate
-                          </Button>
-                        </li>
+                <>
+                  {hasCommercialLearnings && (
+                    <div className="mb-2 flex gap-1.5">
+                      {(["all", "content", "commercial"] as const).map((f) => (
+                        <button
+                          key={f}
+                          onClick={() => setLearningFilter(f)}
+                          className={`rounded-full border px-2.5 py-1 text-xs capitalize ${
+                            learningFilter === f
+                              ? "border-accent bg-accent-soft text-accent"
+                              : "border-border text-subtle hover:text-ink"
+                          }`}
+                        >
+                          {f}
+                        </button>
                       ))}
-                    </ul>
-                  </CardContent>
-                </Card>
+                    </div>
+                  )}
+                  <Card>
+                    <CardContent className="p-0">
+                      <ul className="divide-y divide-border">
+                        {visibleLearnings.map((learning) => {
+                          const commercial = isCommercialLearning(learning);
+                          return (
+                            <li key={learning.id} className="p-4 flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm text-ink">{learning.statement}</p>
+                                <div className="mt-1 flex items-center gap-2">
+                                  <ConfidenceBadge confidence={learning.confidence} />
+                                  <Badge tone="neutral">{learning.scope}</Badge>
+                                  <Badge tone="neutral">
+                                    {learning.evidence_ids.length} {commercial ? "deals" : "posts"}
+                                  </Badge>
+                                  {commercial && <Badge tone="accent">commercial</Badge>}
+                                </div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                onClick={() => handleRetract(learning.id)}
+                                disabled={busyLearningId === learning.id}
+                              >
+                                Not accurate
+                              </Button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </>
               )}
             </section>
           </>

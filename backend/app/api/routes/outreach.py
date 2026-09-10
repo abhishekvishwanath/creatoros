@@ -39,6 +39,7 @@ from app.domain.commercial.service import (
     record_brand_reply,
     record_creator_decision,
 )
+from app.domain.experiments.service import outcome_has_learning_signal, sync_commercial_learnings
 from app.domain.creator.models import Creator
 from app.schemas.commercial import (
     CreatorDecisionRequest,
@@ -286,6 +287,32 @@ async def record_decision_route(
         thread = await record_creator_decision(db, thread_id=thread_id, decision=payload.decision, note=payload.note)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    # Committed on its own, before the learning sync below — the creator's
+    # decision is the primary, creator-intended write and must never be
+    # rolled back by a failure in the secondary, best-effort derived-
+    # learning step (e.g. a rare concurrent-insert race on the
+    # StrategicLearning unique constraint from two different threads in
+    # the same brand category resolving at once).
     await db.commit()
     await db.refresh(thread)
+
+    if outcome_has_learning_signal(thread.outcome):
+        # CLAUDE.md §60/§72: a resolved deal is exactly the kind of event
+        # that should let "next week's strategy already know what
+        # happened" — mirrors how a fresh performance diagnosis
+        # auto-triggers sync_learnings today. An "archive" decision has no
+        # clear directional signal (see _OUTCOME_DIRECTION), so it's
+        # excluded here rather than triggering a guaranteed-no-op sync.
+        try:
+            await sync_commercial_learnings(db, creator_id=creator.id)
+            await db.commit()
+        except Exception:
+            # Best-effort: the creator's decision is already durably
+            # saved above regardless of what happens here. A missed sync
+            # self-corrects the next time any thread in this creator's
+            # commercial loop resolves (sync_learnings recomputes the full
+            # current cluster set from scratch, not just a delta), or via
+            # the manual "Re-sync" action on Analytics.
+            await db.rollback()
+
     return thread
