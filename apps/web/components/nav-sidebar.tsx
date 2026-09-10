@@ -12,6 +12,7 @@ import {
   BarChart3,
   Dna,
   Building2,
+  Send,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/brands", label: "Brands", icon: Building2 },
+  { href: "/outreach", label: "Outreach", icon: Send },
   { href: "/creator-dna", label: "Creator DNA", icon: Dna },
 ];
 

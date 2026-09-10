@@ -187,3 +187,73 @@ class CampaignBrief(Base, TimestampMixin):
     personalization_facts: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     evidence_signal_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class OutreachThread(Base, TimestampMixin, CreatorScopedMixin):
+    """Part II Phase 6 (CLAUDE.md §66, §70). One thread per outreach attempt
+    at a brand opportunity — NOT upserted-by-FK like CampaignBrief/
+    BrandOpportunity, because a creator may genuinely run more than one
+    outreach attempt at the same opportunity over time (a different
+    contact, a retry months later); each is real history worth keeping,
+    not a "current state" to overwrite.
+
+    `campaign_brief_id` is a reference for UI traceability only — the
+    actual pitch text lives on this thread's initial OutreachMessage.body,
+    snapshotted at creation time. Regenerating the campaign brief later
+    must not silently change what an already-drafted/approved/sent message
+    says, so the message body (not a live join to CampaignBrief) is what a
+    read ever shows.
+
+    `status` is the pipeline stage: drafting -> approved -> sent -> replied
+    -> won/lost/archived. Only drafting/approved/sent are reachable in
+    Phase 6 (message approve/send transitions below); `replied` arrives
+    with Phase 7's paste-in-a-reply flow, and won/lost/archived only ever
+    get set by a future creator-decision route — never by this model's
+    transitions and never by OutreachAgent (CLAUDE.md §66: the Outreach
+    Agent researches, drafts, and classifies; it never negotiates, accepts,
+    rejects, or writes outcome/creator_decision/status beyond drafting)."""
+
+    __tablename__ = "outreach_threads"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("outreach_thread"))
+    brand_opportunity_id: Mapped[str] = mapped_column(
+        String, ForeignKey("brand_opportunities.id", ondelete="CASCADE"), index=True
+    )
+    contact_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("brand_contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_brief_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("campaign_briefs.id", ondelete="SET NULL"), nullable=True
+    )
+    # drafting | approved | sent | replied | won | lost | archived
+    status: Mapped[str] = mapped_column(String, default="drafting")
+    outcome: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    creator_decision: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    creator_decision_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deal_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class OutreachMessage(Base, TimestampMixin):
+    """One row per message in a thread, in both directions. `status` is
+    only meaningful for outbound messages (draft -> approved -> sent —
+    CLAUDE.md §70's human-in-the-loop gate: mark-sent requires approved
+    first, enforced in app/domain/commercial/service.py, not just by
+    prompt wording). `extracted_data` is populated only for inbound
+    brand_reply messages, starting Phase 7."""
+
+    __tablename__ = "outreach_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("outreach_message"))
+    thread_id: Mapped[str] = mapped_column(String, ForeignKey("outreach_threads.id", ondelete="CASCADE"), index=True)
+    # outbound | inbound
+    direction: Mapped[str] = mapped_column(String)
+    # initial_pitch | follow_up | brand_reply
+    kind: Mapped[str] = mapped_column(String)
+    subject: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    # draft | approved | sent — null for inbound messages, which have no
+    # send lifecycle of their own.
+    status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    extracted_data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

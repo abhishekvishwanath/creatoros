@@ -23,6 +23,8 @@ from app.domain.commercial.models import (
     BrandSignal,
     CampaignBrief,
     CommercialProfile,
+    OutreachMessage,
+    OutreachThread,
 )
 from app.domain.shared.versioned_profile import apply_versioned_profile_update, get_current_versioned_profile
 
@@ -127,6 +129,13 @@ async def list_brand_contacts(db: AsyncSession, *, brand_id: str) -> list[BrandC
         select(BrandContact).where(BrandContact.brand_id == brand_id).order_by(desc(BrandContact.created_at))
     )
     return list(result.scalars().all())
+
+
+async def get_brand_contact(db: AsyncSession, *, brand_id: str, contact_id: str) -> Optional[BrandContact]:
+    result = await db.execute(
+        select(BrandContact).where(BrandContact.id == contact_id, BrandContact.brand_id == brand_id)
+    )
+    return result.scalar_one_or_none()
 
 
 async def add_brand_signal(db: AsyncSession, *, creator_id: str, brand_id: Optional[str], data: dict) -> BrandSignal:
@@ -297,3 +306,134 @@ async def apply_campaign_brief(
     brief.confidence = confidence
     await db.flush()
     return brief
+
+
+# --- Outreach (CLAUDE.md §66, §70, Part II Phase 6) --------------------------
+# Draft-only, human-in-the-loop: CreatorOS never sends anything. A message
+# must be explicitly approved, then explicitly marked sent by the creator —
+# both gates enforced here (ValueError on an invalid transition), not only
+# by the route or the UI, so no future caller can skip them either. The
+# Outreach Agent (app/agent_service/agents/outreach.py) only ever produces a
+# draft; nothing in this module ever sets status to "approved"/"sent" except
+# these two explicit, creator-triggered functions, and nothing here ever
+# touches outcome/creator_decision (CLAUDE.md §66 — that's a future route's
+# job alone, on an explicit creator decision, never an agent's).
+
+MESSAGE_APPROVABLE_FROM = ("draft",)
+MESSAGE_SENDABLE_FROM = ("approved",)
+
+
+async def create_outreach_thread(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    brand_opportunity_id: str,
+    contact_id: Optional[str] = None,
+    campaign_brief_id: Optional[str] = None,
+) -> OutreachThread:
+    thread = OutreachThread(
+        id=generate_id("outreach_thread"),
+        creator_id=creator_id,
+        brand_opportunity_id=brand_opportunity_id,
+        contact_id=contact_id,
+        campaign_brief_id=campaign_brief_id,
+        status="drafting",
+    )
+    db.add(thread)
+    await db.flush()
+    return thread
+
+
+async def get_outreach_thread(db: AsyncSession, *, creator_id: str, thread_id: str) -> Optional[OutreachThread]:
+    result = await db.execute(
+        select(OutreachThread).where(OutreachThread.id == thread_id, OutreachThread.creator_id == creator_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_outreach_threads(db: AsyncSession, *, creator_id: str) -> list[tuple[OutreachThread, Brand]]:
+    """Joined with Brand (via BrandOpportunity) for the pipeline board, same
+    join-so-the-UI-gets-one-round-trip pattern as list_brand_opportunities."""
+    result = await db.execute(
+        select(OutreachThread, Brand)
+        .join(BrandOpportunity, BrandOpportunity.id == OutreachThread.brand_opportunity_id)
+        .join(Brand, Brand.id == BrandOpportunity.brand_id)
+        .where(OutreachThread.creator_id == creator_id)
+        .order_by(desc(OutreachThread.created_at))
+    )
+    return [(thread, brand) for thread, brand in result.all()]
+
+
+async def add_outreach_message(
+    db: AsyncSession,
+    *,
+    thread_id: str,
+    direction: str,
+    kind: str,
+    subject: Optional[str],
+    body: str,
+    status: Optional[str] = None,
+) -> OutreachMessage:
+    message = OutreachMessage(
+        id=generate_id("outreach_message"),
+        thread_id=thread_id,
+        direction=direction,
+        kind=kind,
+        subject=subject,
+        body=body,
+        status=status,
+    )
+    db.add(message)
+    await db.flush()
+    return message
+
+
+async def list_outreach_messages(db: AsyncSession, *, thread_id: str) -> list[OutreachMessage]:
+    result = await db.execute(
+        select(OutreachMessage).where(OutreachMessage.thread_id == thread_id).order_by(OutreachMessage.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def get_outreach_message(db: AsyncSession, *, thread_id: str, message_id: str) -> Optional[OutreachMessage]:
+    result = await db.execute(
+        select(OutreachMessage).where(OutreachMessage.id == message_id, OutreachMessage.thread_id == thread_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def approve_outreach_message(db: AsyncSession, *, message_id: str) -> OutreachMessage:
+    """Raises ValueError (caller maps to 409) — a direct creator action from
+    a button click needs an invalid transition to surface, not vanish (same
+    convention as app/domain/content/service.py::mark_content_stage)."""
+    message = await db.get(OutreachMessage, message_id)
+    if message is None:
+        raise ValueError("Outreach message not found.")
+    if message.status not in MESSAGE_APPROVABLE_FROM:
+        raise ValueError(f"Cannot approve from status {message.status!r} (expected one of {MESSAGE_APPROVABLE_FROM}).")
+    message.status = "approved"
+    if message.kind == "initial_pitch":
+        thread = await db.get(OutreachThread, message.thread_id)
+        if thread is not None and thread.status == "drafting":
+            thread.status = "approved"
+    await db.flush()
+    return message
+
+
+async def mark_outreach_message_sent(db: AsyncSession, *, message_id: str) -> OutreachMessage:
+    """The only path a message can reach 'sent' — requires 'approved' first
+    (CLAUDE.md §70's human-in-the-loop gate), and is only ever called from
+    an explicit creator action, never automatically."""
+    message = await db.get(OutreachMessage, message_id)
+    if message is None:
+        raise ValueError("Outreach message not found.")
+    if message.status not in MESSAGE_SENDABLE_FROM:
+        raise ValueError(f"Cannot mark sent from status {message.status!r} (expected one of {MESSAGE_SENDABLE_FROM}).")
+    message.status = "sent"
+    message.sent_at = datetime.now(timezone.utc)
+    if message.kind == "initial_pitch":
+        thread = await db.get(OutreachThread, message.thread_id)
+        if thread is not None and thread.status == "approved":
+            thread.status = "sent"
+    await db.flush()
+    return message

@@ -14,6 +14,7 @@ import {
   addBrandContact,
   addBrandSignal,
   createBrand,
+  createOutreachThread,
   generateCampaignBrief,
   getBrand,
   getCampaignBrief,
@@ -318,6 +319,9 @@ function BrandsPageInner() {
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
   const [briefWarnings, setBriefWarnings] = useState<string[]>([]);
+  const [startingOutreach, setStartingOutreach] = useState(false);
+  const [outreachError, setOutreachError] = useState<string | null>(null);
+  const [outreachWarnings, setOutreachWarnings] = useState<string[]>([]);
 
   const refetchBrands = useCallback(async () => {
     const session = getSession();
@@ -415,6 +419,32 @@ function BrandsPageInner() {
     }
   }
 
+  async function handleStartOutreach() {
+    const session = getSession();
+    if (!session || !opportunityId) return;
+    const requestedFor = opportunityId;
+    setStartingOutreach(true);
+    setOutreachError(null);
+    setOutreachWarnings([]);
+    try {
+      // Address it to a contact already on file when one exists — the
+      // whole point of tracking a contact is so outreach gets personalized
+      // to them instead of drafting a generic "Hi there".
+      const result = await createOutreachThread(session.creatorId, requestedFor, contacts[0]?.id);
+      if (opportunityIdRef.current !== requestedFor) return;
+      if (result.thread) {
+        router.push(`/outreach?thread=${result.thread.id}`);
+        return;
+      }
+      setOutreachWarnings(result.warnings);
+    } catch (err) {
+      if (opportunityIdRef.current !== requestedFor) return;
+      setOutreachError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      if (opportunityIdRef.current === requestedFor) setStartingOutreach(false);
+    }
+  }
+
   async function handleScore() {
     const session = getSession();
     if (!session || !selected) return;
@@ -460,6 +490,8 @@ function BrandsPageInner() {
       setContactRolePrefill(null);
       setBriefError(null);
       setBriefWarnings([]);
+      setOutreachError(null);
+      setOutreachWarnings([]);
       router.replace(id ? `/brands?brand=${id}` : "/brands");
     },
     [router]
@@ -753,6 +785,15 @@ function BrandsPageInner() {
                       />
                       <BulletList label="Worth mentioning in outreach:" items={campaignBrief.personalization_facts ?? []} />
                       <ConfidenceBadge confidence={campaignBrief.confidence} />
+                      <div className="pt-1">
+                        <Button onClick={handleStartOutreach} disabled={startingOutreach}>
+                          {startingOutreach ? "Drafting outreach…" : "Start outreach"}
+                        </Button>
+                        {outreachError && <p className="mt-2 text-sm text-bad">{outreachError}</p>}
+                        {outreachWarnings.length > 0 && (
+                          <p className="mt-2 text-sm text-warn">{outreachWarnings.join(" ")}</p>
+                        )}
+                      </div>
                     </div>
                   )}
                   {!campaignBrief && !loadingBrief && currentOpportunity && !briefError && briefWarnings.length === 0 && (

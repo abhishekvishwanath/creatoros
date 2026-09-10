@@ -10,6 +10,7 @@ from app.api.routes import (
     health,
     learnings,
     opportunities,
+    outreach,
     performance,
     research,
     strategy,
@@ -32,3 +33,4 @@ api_router.include_router(learnings.router)
 api_router.include_router(commercial.router)
 api_router.include_router(brands.router)
 api_router.include_router(brands.radar_router)
+api_router.include_router(outreach.router)

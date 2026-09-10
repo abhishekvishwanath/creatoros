@@ -19,10 +19,12 @@ import type {
   ContentDetailRead,
   ContentItemCreate,
   ContentItemRead,
+  CreateOutreachThreadResponse,
   CreatorCreateResponse,
   CreatorRead,
   CreatorStateSnapshot,
   DiagnoseResponse,
+  DraftFollowUpResponse,
   GenerateBriefResponse,
   GenerateCampaignBriefResponse,
   GenerateOpportunitiesResponse,
@@ -31,6 +33,9 @@ import type {
   LearningRead,
   OpportunityRead,
   OpportunityStatus,
+  OutreachMessageRead,
+  OutreachPipelineItem,
+  OutreachThreadDetail,
   PerformanceOverviewItem,
   PerformanceSnapshotCreate,
   PerformanceSnapshotRead,
@@ -336,6 +341,37 @@ export function generateCampaignBrief(creatorId: string, opportunityId: string) 
     `/creators/${creatorId}/brand-opportunities/${opportunityId}/campaign-brief`,
     { method: "POST" }
   );
+}
+
+export function createOutreachThread(creatorId: string, opportunityId: string, contactId?: string) {
+  return request<CreateOutreachThreadResponse>(`/creators/${creatorId}/brand-opportunities/${opportunityId}/outreach`, {
+    method: "POST",
+    body: JSON.stringify({ contact_id: contactId ?? null }),
+  });
+}
+
+export function listOutreachPipeline(creatorId: string) {
+  return request<OutreachPipelineItem[]>(`/creators/${creatorId}/outreach`);
+}
+
+export function getOutreachThread(creatorId: string, threadId: string) {
+  return request<OutreachThreadDetail>(`/creators/${creatorId}/outreach/${threadId}`);
+}
+
+export function approveOutreachMessage(creatorId: string, threadId: string, messageId: string) {
+  return request<OutreachMessageRead>(`/creators/${creatorId}/outreach/${threadId}/messages/${messageId}/approve`, {
+    method: "PATCH",
+  });
+}
+
+export function markOutreachMessageSent(creatorId: string, threadId: string, messageId: string) {
+  return request<OutreachMessageRead>(`/creators/${creatorId}/outreach/${threadId}/messages/${messageId}/mark-sent`, {
+    method: "PATCH",
+  });
+}
+
+export function draftOutreachFollowUp(creatorId: string, threadId: string) {
+  return request<DraftFollowUpResponse>(`/creators/${creatorId}/outreach/${threadId}/follow-up`, { method: "POST" });
 }
 
 export function getLearnings(creatorId: string) {

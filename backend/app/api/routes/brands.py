@@ -12,10 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.agent_service.agents.brand_intelligence import BrandIntelligenceAgent
 from app.agent_service.agents.campaign_intelligence import CampaignIntelligenceAgent
+from app.agent_service.agents.outreach import OutreachAgent
 from app.agent_service.context.builder import (
     build_brand_opportunity_context,
     build_campaign_brief_context,
     build_creator_state_snapshot,
+    build_outreach_context,
 )
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
@@ -27,7 +29,10 @@ from app.domain.commercial.service import (
     apply_brand_opportunity_score,
     apply_campaign_brief,
     create_brand,
+    create_outreach_thread,
+    add_outreach_message,
     get_brand,
+    get_brand_contact,
     get_brand_opportunity_by_id,
     get_campaign_brief,
     list_brand_contacts,
@@ -46,7 +51,11 @@ from app.schemas.commercial import (
     BrandSignalCreate,
     BrandSignalRead,
     CampaignBriefRead,
+    CreateOutreachThreadRequest,
+    CreateOutreachThreadResponse,
     GenerateCampaignBriefResponse,
+    OutreachMessageRead,
+    OutreachThreadRead,
     ScoreBrandOpportunityResponse,
 )
 
@@ -257,3 +266,80 @@ async def generate_campaign_brief_route(
 
     await db.commit()
     return GenerateCampaignBriefResponse(brief=brief_read, warnings=output.warnings)
+
+
+@radar_router.post("/{opportunity_id}/outreach", response_model=CreateOutreachThreadResponse, status_code=201)
+async def create_outreach_thread_route(
+    opportunity_id: str,
+    payload: CreateOutreachThreadRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> CreateOutreachThreadResponse:
+    """Starts a new outreach thread and drafts its initial pitch in one
+    step. Nothing is persisted unless the agent actually produced a usable
+    draft (CLAUDE.md §43 — no half-successful state that looks valid): a
+    stub-mode skip or a failed draft leaves no thread/message behind, only
+    warnings, mirroring the brand-scoring/campaign-brief response shape."""
+    opportunity = await _get_owned_opportunity(db, creator, opportunity_id)
+    brand = await _get_owned_brand(db, creator, opportunity.brand_id)
+    brief = await get_campaign_brief(db, brand_opportunity_id=opportunity_id)
+    if brief is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Generate a campaign brief before starting outreach.")
+
+    contact = None
+    if payload.contact_id:
+        contact = await get_brand_contact(db, brand_id=brand.id, contact_id=payload.contact_id)
+        if contact is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found on this brand")
+
+    outreach_context = build_outreach_context(brand, brief, contact)
+    creator_snapshot = await build_creator_state_snapshot(db, creator)
+
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    output = await orchestrator.run_agent(
+        agent=OutreachAgent(),
+        creator_id=creator.id,
+        workflow_name="outreach_initial_pitch",
+        context=creator_snapshot,
+        brand=outreach_context["brand"],
+        brief=outreach_context["brief"],
+        contact=outreach_context["contact"],
+        kind="initial_pitch",
+    )
+
+    if output.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=output.summary + ("; " + "; ".join(output.warnings) if output.warnings else ""),
+        )
+
+    draft_data = None
+    for change in output.proposed_state_changes:
+        if change.get("type") == "outreach_message_draft":
+            draft_data = change["data"]
+
+    if draft_data is None:
+        return CreateOutreachThreadResponse(thread=None, message=None, warnings=output.warnings)
+
+    thread = await create_outreach_thread(
+        db,
+        creator_id=creator.id,
+        brand_opportunity_id=opportunity_id,
+        contact_id=contact.id if contact else None,
+        campaign_brief_id=brief.id,
+    )
+    message = await add_outreach_message(
+        db,
+        thread_id=thread.id,
+        direction="outbound",
+        kind="initial_pitch",
+        subject=draft_data.get("subject"),
+        body=draft_data.get("body", ""),
+        status="draft",
+    )
+    await db.commit()
+    return CreateOutreachThreadResponse(
+        thread=validate_or_502(OutreachThreadRead, thread, label="Outreach"),
+        message=validate_or_502(OutreachMessageRead, message, label="Outreach"),
+        warnings=output.warnings,
+    )

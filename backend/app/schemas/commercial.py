@@ -184,3 +184,60 @@ class CampaignBriefRead(BaseModel):
 class GenerateCampaignBriefResponse(BaseModel):
     brief: Optional[CampaignBriefRead] = None
     warnings: list[str] = Field(default_factory=list)
+
+
+class OutreachMessageRead(BaseModel):
+    id: str
+    thread_id: str
+    direction: str
+    kind: str
+    subject: Optional[str] = None
+    body: str
+    status: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    extracted_data: Optional[dict] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OutreachThreadRead(BaseModel):
+    id: str
+    brand_opportunity_id: str
+    contact_id: Optional[str] = None
+    campaign_brief_id: Optional[str] = None
+    status: str
+    outcome: Optional[str] = None
+    creator_decision: Optional[str] = None
+    creator_decision_note: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    deal_value: Optional[float] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OutreachThreadDetail(BaseModel):
+    thread: OutreachThreadRead
+    brand: BrandRead
+    messages: list[OutreachMessageRead] = Field(default_factory=list)
+
+
+class OutreachPipelineItem(BaseModel):
+    thread: OutreachThreadRead
+    brand: BrandRead
+
+
+class CreateOutreachThreadRequest(BaseModel):
+    contact_id: Optional[str] = None
+
+
+class CreateOutreachThreadResponse(BaseModel):
+    thread: Optional[OutreachThreadRead] = None
+    message: Optional[OutreachMessageRead] = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DraftFollowUpResponse(BaseModel):
+    message: Optional[OutreachMessageRead] = None
+    warnings: list[str] = Field(default_factory=list)

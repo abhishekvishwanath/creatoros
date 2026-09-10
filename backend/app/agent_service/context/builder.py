@@ -11,6 +11,8 @@ recent successful scripts and audience segment detail on top of this base,
 rather than every agent reaching into the ORM directly.
 """
 
+from typing import Optional
+
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,7 +28,7 @@ from app.domain.creator.models import (
     CreatorProfile,
     VoiceProfile,
 )
-from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal
+from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal, CampaignBrief, OutreachMessage
 from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
@@ -391,3 +393,35 @@ async def build_campaign_brief_context(db: AsyncSession, opportunity: BrandOppor
             "reasons": opportunity.reasons,
         },
     }
+
+
+def build_outreach_context(brand: Brand, brief: CampaignBrief, contact: Optional[BrandContact]) -> dict:
+    """Task-specific context for the Outreach Agent (Part II Phase 6): the
+    campaign brief's already-grounded pitch material (never re-derived —
+    the agent drafts prose from it, it doesn't re-decide the strategy), and
+    the contact it's addressed to, if known. No DB access needed — the
+    route already has all three objects in hand from the create-thread
+    flow, so this is pure shaping, unlike the async builders above."""
+    return {
+        "brand": _brand_to_prompt_dict(brand),
+        "brief": {
+            "campaign_concept": brief.campaign_concept,
+            "pitch_angle": brief.pitch_angle,
+            "why_this_brand": brief.why_this_brand,
+            "why_now": brief.why_now,
+            "suggested_cta": brief.suggested_cta,
+            "personalization_facts": brief.personalization_facts or [],
+        },
+        "contact": {"name": contact.name, "role": contact.role} if contact else None,
+    }
+
+
+async def build_outreach_followup_context(db: AsyncSession, thread_id: str) -> list[dict]:
+    """Prior messages in a thread, chronological — so a follow-up draft
+    doesn't repeat the initial pitch verbatim and can reference what's
+    already been said (CLAUDE.md §66: the agent may draft follow-ups, it
+    just may never decide anything on the creator's behalf)."""
+    result = await db.execute(
+        select(OutreachMessage).where(OutreachMessage.thread_id == thread_id).order_by(OutreachMessage.created_at)
+    )
+    return [{"direction": m.direction, "kind": m.kind, "body": m.body} for m in result.scalars().all()]

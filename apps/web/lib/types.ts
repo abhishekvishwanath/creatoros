@@ -560,6 +560,55 @@ export interface BrandRadarItem {
   opportunity: BrandOpportunityRead;
 }
 
+export interface OutreachMessageRead {
+  id: string;
+  thread_id: string;
+  direction: "outbound" | "inbound";
+  kind: "initial_pitch" | "follow_up" | "brand_reply";
+  subject: string | null;
+  body: string;
+  status: "draft" | "approved" | "sent" | null;
+  sent_at: string | null;
+  extracted_data: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface OutreachThreadRead {
+  id: string;
+  brand_opportunity_id: string;
+  contact_id: string | null;
+  campaign_brief_id: string | null;
+  status: string;
+  outcome: string | null;
+  creator_decision: string | null;
+  creator_decision_note: string | null;
+  decided_at: string | null;
+  deal_value: number | null;
+  created_at: string;
+}
+
+export interface OutreachThreadDetail {
+  thread: OutreachThreadRead;
+  brand: BrandRead;
+  messages: OutreachMessageRead[];
+}
+
+export interface OutreachPipelineItem {
+  thread: OutreachThreadRead;
+  brand: BrandRead;
+}
+
+export interface CreateOutreachThreadResponse {
+  thread: OutreachThreadRead | null;
+  message: OutreachMessageRead | null;
+  warnings: string[];
+}
+
+export interface DraftFollowUpResponse {
+  message: OutreachMessageRead | null;
+  warnings: string[];
+}
+
 export interface LearningRead {
   id: string;
   statement: string;
