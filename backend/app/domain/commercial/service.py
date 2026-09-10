@@ -267,19 +267,6 @@ async def get_campaign_brief(db: AsyncSession, *, brand_opportunity_id: str) -> 
     return result.scalar_one_or_none()
 
 
-_CAMPAIGN_BRIEF_FIELDS = (
-    "objective_hypothesis",
-    "campaign_concept",
-    "content_format",
-    "why_this_brand",
-    "why_now",
-    "suggested_cta",
-    "suggested_deliverables",
-    "pitch_angle",
-    "personalization_facts",
-)
-
-
 async def apply_campaign_brief(
     db: AsyncSession,
     *,
@@ -290,21 +277,22 @@ async def apply_campaign_brief(
 ) -> CampaignBrief:
     """One current brief per BrandOpportunity — "Create pitch" again
     regenerates this row in place rather than accumulating duplicates (same
-    upsert-by-foreign-key discipline as apply_brand_opportunity_score)."""
-    field_values = {field: data[field] for field in _CAMPAIGN_BRIEF_FIELDS if field in data}
-
+    upsert-by-foreign-key discipline as apply_brand_opportunity_score, whose
+    explicit-assignment-on-both-branches style this mirrors)."""
     brief = await get_campaign_brief(db, brand_opportunity_id=brand_opportunity_id)
     if brief is None:
-        brief = CampaignBrief(
-            id=generate_id("campaign_brief"),
-            brand_opportunity_id=brand_opportunity_id,
-            **field_values,
-        )
+        brief = CampaignBrief(id=generate_id("campaign_brief"), brand_opportunity_id=brand_opportunity_id)
         db.add(brief)
-    else:
-        for field, value in field_values.items():
-            setattr(brief, field, value)
 
+    brief.objective_hypothesis = data.get("objective_hypothesis")
+    brief.campaign_concept = data.get("campaign_concept")
+    brief.content_format = data.get("content_format")
+    brief.why_this_brand = data.get("why_this_brand")
+    brief.why_now = data.get("why_now")
+    brief.suggested_cta = data.get("suggested_cta")
+    brief.suggested_deliverables = data.get("suggested_deliverables")
+    brief.pitch_angle = data.get("pitch_angle")
+    brief.personalization_facts = data.get("personalization_facts")
     brief.evidence_signal_ids = evidence_signal_ids
     brief.confidence = confidence
     await db.flush()

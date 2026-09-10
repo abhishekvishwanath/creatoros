@@ -40,6 +40,25 @@ function ScoreBadge({ score }: { score: number | null }) {
   return <Badge tone={scoreTone(score)}>{Math.round(score * 100)}/100</Badge>;
 }
 
+function BulletList({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="text-subtle">{label}</p>
+      <ul className="list-disc space-y-0.5 pl-5">
+        {items.map((item, i) => (
+          // Index-keyed alongside the text: the model can repeat a string
+          // across two distinct deliverables/facts, and a bare text key
+          // would then collide and let React reuse/misrender a list node.
+          <li key={`${i}-${item}`} className="text-ink">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function BrandsPage() {
   return (
     <Suspense
@@ -340,6 +359,15 @@ function BrandsPageInner() {
   // gets scored for the first time (currentOpportunity flips from null to
   // an id) without needing a separate reset in selectBrand.
   const opportunityId = currentOpportunity?.id ?? null;
+  // Tracks the latest opportunityId outside of any single effect/handler's
+  // closure so an in-flight request started for a brand the creator has
+  // since navigated away from can detect that at resolution time, instead
+  // of overwriting the now-displayed brand's card with a stale result.
+  const opportunityIdRef = useRef(opportunityId);
+  useEffect(() => {
+    opportunityIdRef.current = opportunityId;
+  }, [opportunityId]);
+
   useEffect(() => {
     if (!opportunityId) {
       setCampaignBrief(null);
@@ -353,6 +381,9 @@ function BrandsPageInner() {
       .then((brief) => {
         if (!cancelled) setCampaignBrief(brief);
       })
+      .catch((err) => {
+        if (!cancelled) setBriefError(err instanceof ApiError ? err.message : "Couldn't load the campaign pitch.");
+      })
       .finally(() => {
         if (!cancelled) setLoadingBrief(false);
       });
@@ -364,17 +395,23 @@ function BrandsPageInner() {
   async function handleGenerateBrief() {
     const session = getSession();
     if (!session || !opportunityId) return;
+    const requestedFor = opportunityId;
     setGeneratingBrief(true);
     setBriefError(null);
     setBriefWarnings([]);
     try {
-      const result = await generateCampaignBrief(session.creatorId, opportunityId);
+      const result = await generateCampaignBrief(session.creatorId, requestedFor);
+      // The creator may have selected a different brand while this request
+      // was in flight — a stale response must not overwrite what's now on
+      // screen for a brand this result has nothing to do with.
+      if (opportunityIdRef.current !== requestedFor) return;
       setBriefWarnings(result.warnings);
       if (result.brief) setCampaignBrief(result.brief);
     } catch (err) {
+      if (opportunityIdRef.current !== requestedFor) return;
       setBriefError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
-      setGeneratingBrief(false);
+      if (opportunityIdRef.current === requestedFor) setGeneratingBrief(false);
     }
   }
 
@@ -710,26 +747,11 @@ function BrandsPageInner() {
                       {campaignBrief.suggested_cta && (
                         <p><span className="text-subtle">Suggested CTA: </span>{campaignBrief.suggested_cta}</p>
                       )}
-                      {campaignBrief.suggested_deliverables && campaignBrief.suggested_deliverables.length > 0 && (
-                        <div>
-                          <p className="text-subtle">Proposed deliverables — a starting point to negotiate, not a commitment:</p>
-                          <ul className="list-disc space-y-0.5 pl-5">
-                            {campaignBrief.suggested_deliverables.map((d) => (
-                              <li key={d} className="text-ink">{d}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {campaignBrief.personalization_facts && campaignBrief.personalization_facts.length > 0 && (
-                        <div>
-                          <p className="text-subtle">Worth mentioning in outreach:</p>
-                          <ul className="list-disc space-y-0.5 pl-5">
-                            {campaignBrief.personalization_facts.map((f) => (
-                              <li key={f} className="text-ink">{f}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                      <BulletList
+                        label="Proposed deliverables — a starting point to negotiate, not a commitment:"
+                        items={campaignBrief.suggested_deliverables ?? []}
+                      />
+                      <BulletList label="Worth mentioning in outreach:" items={campaignBrief.personalization_facts ?? []} />
                       <ConfidenceBadge confidence={campaignBrief.confidence} />
                     </div>
                   )}

@@ -133,3 +133,34 @@ async def test_get_brand_opportunity_by_id_is_scoped_to_creator():
 
     assert found_for_owner is not None
     assert found_for_other is None
+
+
+async def test_concurrent_brief_for_same_opportunity_is_rejected_at_db_level():
+    """Regression guard: the unique constraint on brand_opportunity_id is the
+    backstop against a race between two concurrent inserts for the same
+    opportunity (same bug class as BrandOpportunity's brand_id constraint,
+    CalendarEvent's content_item_id constraint, and StrategicLearning's
+    (creator_id, category) constraint) — apply_campaign_brief's
+    select-then-insert has a window where two concurrent callers could both
+    see no row and both attempt an insert; the DB constraint is what
+    actually prevents a duplicate row, surfacing as IntegrityError rather
+    than silent duplication."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.core.ids import generate_id
+    from app.domain.commercial.models import CampaignBrief
+
+    creator_id = await _make_creator()
+    opportunity_id = await _make_scored_opportunity(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        session.add(CampaignBrief(id=generate_id("campaign_brief"), brand_opportunity_id=opportunity_id))
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        session.add(CampaignBrief(id=generate_id("campaign_brief"), brand_opportunity_id=opportunity_id))
+        try:
+            await session.commit()
+            assert False, "expected IntegrityError"
+        except IntegrityError:
+            await session.rollback()

@@ -313,6 +313,25 @@ async def build_performance_context(db: AsyncSession, content_item: ContentItem)
     }
 
 
+def _brand_to_prompt_dict(brand: Brand) -> dict:
+    """Shared brand shape handed to every commercial-loop agent prompt
+    (Brand Intelligence, Campaign Intelligence) — one place to change what
+    a brand looks like to a model, instead of each context builder
+    re-deriving the same fields independently."""
+    return {
+        "id": brand.id,
+        "name": brand.name,
+        "category": brand.category,
+        "description": brand.description,
+        "positioning": brand.positioning,
+    }
+
+
+def _signals_to_prompt_list(signals: list[BrandSignal]) -> list[dict]:
+    """Shared signal shape handed to every commercial-loop agent prompt."""
+    return [{"id": s.id, "signal_type": s.signal_type, "summary": s.summary} for s in signals]
+
+
 def compute_contactability(contacts: list[BrandContact]) -> float:
     """Code-computed, never model-scored (CLAUDE.md §20, §71) — a brand's
     contactability is a fact about what this creator has on file, not a
@@ -336,22 +355,13 @@ async def build_brand_opportunity_context(db: AsyncSession, brand: Brand) -> dic
     signals_result = await db.execute(
         select(BrandSignal).where(BrandSignal.brand_id == brand.id).order_by(desc(BrandSignal.created_at)).limit(20)
     )
-    signals = [
-        {"id": s.id, "signal_type": s.signal_type, "summary": s.summary}
-        for s in signals_result.scalars().all()
-    ]
+    signals = _signals_to_prompt_list(list(signals_result.scalars().all()))
 
     contacts_result = await db.execute(select(BrandContact).where(BrandContact.brand_id == brand.id))
     contacts = list(contacts_result.scalars().all())
 
     return {
-        "brand": {
-            "id": brand.id,
-            "name": brand.name,
-            "category": brand.category,
-            "description": brand.description,
-            "positioning": brand.positioning,
-        },
+        "brand": _brand_to_prompt_dict(brand),
         "signals": signals,
         "existing_contact_roles": [c.role for c in contacts if c.role],
         "contactability": compute_contactability(contacts),
@@ -369,19 +379,10 @@ async def build_campaign_brief_context(db: AsyncSession, opportunity: BrandOppor
     signals: list[dict] = []
     if signal_ids:
         signals_result = await db.execute(select(BrandSignal).where(BrandSignal.id.in_(signal_ids)))
-        signals = [
-            {"id": s.id, "signal_type": s.signal_type, "summary": s.summary}
-            for s in signals_result.scalars().all()
-        ]
+        signals = _signals_to_prompt_list(list(signals_result.scalars().all()))
 
     return {
-        "brand": {
-            "id": brand.id,
-            "name": brand.name,
-            "category": brand.category,
-            "description": brand.description,
-            "positioning": brand.positioning,
-        },
+        "brand": _brand_to_prompt_dict(brand),
         "signals": signals,
         "opportunity": {
             "id": opportunity.id,
