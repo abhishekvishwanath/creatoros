@@ -21,6 +21,7 @@ import type {
   ContentItemRead,
   CreateOutreachThreadResponse,
   CreatorCreateResponse,
+  CreatorDecision,
   CreatorRead,
   CreatorStateSnapshot,
   DiagnoseResponse,
@@ -36,11 +37,13 @@ import type {
   OutreachMessageRead,
   OutreachPipelineItem,
   OutreachThreadDetail,
+  OutreachThreadRead,
   PerformanceOverviewItem,
   PerformanceSnapshotCreate,
   PerformanceSnapshotRead,
   PublishContentRequest,
   PublishContentResponse,
+  RecordBrandReplyResponse,
   ResearchSignalCreate,
   ResearchSignalRead,
   ReviewScriptResponse,
@@ -372,6 +375,20 @@ export function markOutreachMessageSent(creatorId: string, threadId: string, mes
 
 export function draftOutreachFollowUp(creatorId: string, threadId: string) {
   return request<DraftFollowUpResponse>(`/creators/${creatorId}/outreach/${threadId}/follow-up`, { method: "POST" });
+}
+
+export function recordBrandReply(creatorId: string, threadId: string, body: string, subject?: string) {
+  return request<RecordBrandReplyResponse>(`/creators/${creatorId}/outreach/${threadId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ body, subject: subject ?? null }),
+  });
+}
+
+export function recordOutreachDecision(creatorId: string, threadId: string, decision: CreatorDecision, note?: string) {
+  return request<OutreachThreadRead>(`/creators/${creatorId}/outreach/${threadId}/decision`, {
+    method: "PATCH",
+    body: JSON.stringify({ decision, note: note ?? null }),
+  });
 }
 
 export function getLearnings(creatorId: string) {

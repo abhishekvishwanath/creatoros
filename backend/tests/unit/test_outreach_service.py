@@ -4,6 +4,7 @@ from app.domain.commercial.service import (
     add_outreach_message,
     apply_brand_opportunity_score,
     apply_campaign_brief,
+    apply_extracted_data,
     approve_outreach_message,
     create_brand,
     create_outreach_thread,
@@ -13,6 +14,8 @@ from app.domain.commercial.service import (
     list_outreach_messages,
     list_outreach_threads,
     mark_outreach_message_sent,
+    record_brand_reply,
+    record_creator_decision,
 )
 from app.domain.creator.models import Creator, User
 from app.infrastructure.db.session import AsyncSessionLocal
@@ -276,3 +279,128 @@ async def test_get_outreach_message_is_scoped_to_thread():
 
     assert found_in_own_thread is not None
     assert found_in_wrong_thread is None
+
+
+async def _make_sent_thread(creator_id: str) -> str:
+    """A thread whose initial pitch has been approved and marked sent —
+    the precondition for recording a reply or drafting a follow-up."""
+    opportunity_id = await _make_scored_opportunity(creator_id)
+    async with AsyncSessionLocal() as session:
+        thread = await create_outreach_thread(session, creator_id=creator_id, brand_opportunity_id=opportunity_id)
+        message = await add_outreach_message(
+            session, thread_id=thread.id, direction="outbound", kind="initial_pitch", subject="s", body="b", status="draft"
+        )
+        await session.commit()
+        thread_id, message_id = thread.id, message.id
+
+    async with AsyncSessionLocal() as session:
+        await approve_outreach_message(session, message_id=message_id)
+        await mark_outreach_message_sent(session, message_id=message_id)
+        await session.commit()
+    return thread_id
+
+
+async def test_record_brand_reply_creates_inbound_message_and_advances_thread():
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        message = await record_brand_reply(session, thread_id=thread_id, body="We're interested!", subject="Re: pitch")
+        await session.commit()
+
+    assert message.direction == "inbound"
+    assert message.kind == "brand_reply"
+    assert message.body == "We're interested!"
+    assert message.status is None
+
+    async with AsyncSessionLocal() as session:
+        thread = await get_outreach_thread(session, creator_id=creator_id, thread_id=thread_id)
+    assert thread.status == "replied"
+
+
+async def test_record_brand_reply_does_not_regress_a_further_along_thread():
+    """If the thread is already past 'sent' (e.g. a second reply pasted in
+    later), recording another reply must not reset its stage backward."""
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        await record_brand_reply(session, thread_id=thread_id, body="First reply")
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        await record_brand_reply(session, thread_id=thread_id, body="Second reply, still replied stage")
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        thread = await get_outreach_thread(session, creator_id=creator_id, thread_id=thread_id)
+    assert thread.status == "replied"
+
+
+async def test_apply_extracted_data_sets_message_field():
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        message = await record_brand_reply(session, thread_id=thread_id, body="We're interested!")
+        await session.commit()
+        message_id = message.id
+
+    async with AsyncSessionLocal() as session:
+        updated = await apply_extracted_data(session, message_id=message_id, extracted_data={"sentiment": "interested"})
+        await session.commit()
+
+    assert updated.extracted_data == {"sentiment": "interested"}
+
+
+async def test_record_creator_decision_accept_sets_won_and_outcome():
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        thread = await record_creator_decision(session, thread_id=thread_id, decision="accept", note="Great fit")
+        await session.commit()
+
+    assert thread.status == "won"
+    assert thread.outcome == "deal_confirmed"
+    assert thread.creator_decision == "accept"
+    assert thread.creator_decision_note == "Great fit"
+    assert thread.decided_at is not None
+
+
+async def test_record_creator_decision_decline_sets_lost_and_outcome():
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        thread = await record_creator_decision(session, thread_id=thread_id, decision="decline")
+        await session.commit()
+
+    assert thread.status == "lost"
+    assert thread.outcome == "declined_by_creator"
+
+
+async def test_record_creator_decision_negotiate_does_not_close_thread():
+    """A still-open decision (negotiate/need_more_info) records the
+    creator's stated intent without terminating the thread — CLAUDE.md §66:
+    the system records what the creator decided, it never forces the
+    conversation closed."""
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        thread = await record_creator_decision(session, thread_id=thread_id, decision="negotiate")
+        await session.commit()
+
+    assert thread.status == "sent"  # unchanged — still an open conversation
+    assert thread.outcome is None
+    assert thread.creator_decision == "negotiate"
+
+
+async def test_record_creator_decision_rejects_unrecognized_decision():
+    creator_id = await _make_creator()
+    thread_id = await _make_sent_thread(creator_id)
+
+    async with AsyncSessionLocal() as session:
+        with pytest.raises(ValueError, match="Unrecognized decision"):
+            await record_creator_decision(session, thread_id=thread_id, decision="sign_the_contract")

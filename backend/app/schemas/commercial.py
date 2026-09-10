@@ -241,3 +241,23 @@ class CreateOutreachThreadResponse(BaseModel):
 class DraftFollowUpResponse(BaseModel):
     message: Optional[OutreachMessageRead] = None
     warnings: list[str] = Field(default_factory=list)
+
+
+class RecordBrandReplyRequest(BaseModel):
+    body: str
+    subject: Optional[str] = None
+
+
+class RecordBrandReplyResponse(BaseModel):
+    message: OutreachMessageRead
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CreatorDecisionRequest(BaseModel):
+    # accept | negotiate | decline | need_more_info | archive — see
+    # app.domain.commercial.service.CREATOR_DECISIONS for the canonical set
+    # and what each one does to the thread's status/outcome. This is the
+    # only route in the whole app allowed to set creator_decision/outcome
+    # (CLAUDE.md §66) — the agent has no path to this field.
+    decision: str
+    note: Optional[str] = None

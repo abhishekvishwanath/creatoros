@@ -560,6 +560,17 @@ export interface BrandRadarItem {
   opportunity: BrandOpportunityRead;
 }
 
+export interface ExtractedReplyData {
+  sentiment: "interested" | "neutral" | "declining";
+  summary: string;
+  budget_mentioned: string | null;
+  timeline_mentioned: string | null;
+  deliverables_mentioned: string[];
+  next_steps_from_brand: string | null;
+  open_questions: string[];
+  flags: string[];
+}
+
 export interface OutreachMessageRead {
   id: string;
   thread_id: string;
@@ -569,7 +580,7 @@ export interface OutreachMessageRead {
   body: string;
   status: "draft" | "approved" | "sent" | null;
   sent_at: string | null;
-  extracted_data: Record<string, unknown> | null;
+  extracted_data: ExtractedReplyData | null;
   created_at: string;
 }
 
@@ -608,6 +619,13 @@ export interface DraftFollowUpResponse {
   message: OutreachMessageRead | null;
   warnings: string[];
 }
+
+export interface RecordBrandReplyResponse {
+  message: OutreachMessageRead;
+  warnings: string[];
+}
+
+export type CreatorDecision = "accept" | "negotiate" | "decline" | "need_more_info" | "archive";
 
 export interface LearningRead {
   id: string;

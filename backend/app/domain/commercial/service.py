@@ -437,3 +437,75 @@ async def mark_outreach_message_sent(db: AsyncSession, *, message_id: str) -> Ou
             thread.status = "sent"
     await db.flush()
     return message
+
+
+# --- Response extraction + creator decision (CLAUDE.md §66, Part II Phase 7) -
+# The agent (classify_response, app/agent_service/agents/outreach.py) only
+# ever produces a read-only extraction attached to the inbound message it
+# belongs to. record_creator_decision is the ONLY function in this entire
+# module — in this entire codebase — allowed to write
+# OutreachThread.outcome/creator_decision. It is only ever called from an
+# explicit creator action (a route handling a decision button click), never
+# from an agent (CLAUDE.md §66).
+
+CREATOR_DECISIONS = ("accept", "negotiate", "decline", "need_more_info", "archive")
+# Each decision's effect on the thread's pipeline stage and outcome. A
+# decision that isn't a real resolution yet (negotiate/need_more_info) only
+# records the creator's stated intent — it doesn't close the thread out.
+_DECISION_EFFECTS: dict[str, tuple[Optional[str], Optional[str]]] = {
+    "accept": ("won", "deal_confirmed"),
+    "decline": ("lost", "declined_by_creator"),
+    "negotiate": (None, None),
+    "need_more_info": (None, None),
+    "archive": ("archived", "archived_by_creator"),
+}
+
+
+async def record_brand_reply(
+    db: AsyncSession, *, thread_id: str, body: str, subject: Optional[str] = None
+) -> OutreachMessage:
+    """Recording that a reply happened is plain data entry, not
+    intelligence — it must succeed regardless of whether extraction
+    (a separate step, see apply_extracted_data) later succeeds or is
+    skipped in stub mode, so the creator's evidence is never lost to an
+    agent hiccup (CLAUDE.md §43)."""
+    message = await add_outreach_message(
+        db, thread_id=thread_id, direction="inbound", kind="brand_reply", subject=subject, body=body, status=None
+    )
+    thread = await db.get(OutreachThread, thread_id)
+    if thread is not None and thread.status == "sent":
+        thread.status = "replied"
+    await db.flush()
+    return message
+
+
+async def apply_extracted_data(db: AsyncSession, *, message_id: str, extracted_data: dict) -> OutreachMessage:
+    message = await db.get(OutreachMessage, message_id)
+    if message is None:
+        raise ValueError("Outreach message not found.")
+    message.extracted_data = extracted_data
+    await db.flush()
+    return message
+
+
+async def record_creator_decision(
+    db: AsyncSession, *, thread_id: str, decision: str, note: Optional[str] = None
+) -> OutreachThread:
+    """Raises ValueError (caller maps to 409/400) on an unrecognized
+    decision — same "surface, don't vanish" convention as the message
+    status gates above."""
+    if decision not in CREATOR_DECISIONS:
+        raise ValueError(f"Unrecognized decision {decision!r} (expected one of {CREATOR_DECISIONS}).")
+    thread = await db.get(OutreachThread, thread_id)
+    if thread is None:
+        raise ValueError("Outreach thread not found.")
+
+    new_status, outcome = _DECISION_EFFECTS[decision]
+    thread.creator_decision = decision
+    thread.creator_decision_note = note
+    thread.decided_at = datetime.now(timezone.utc)
+    if new_status is not None:
+        thread.status = new_status
+        thread.outcome = outcome
+    await db.flush()
+    return thread

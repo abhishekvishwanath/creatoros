@@ -416,11 +416,19 @@ def build_outreach_context(brand: Brand, brief: CampaignBrief, contact: Optional
     }
 
 
-async def build_outreach_followup_context(db: AsyncSession, thread_id: str) -> list[dict]:
-    """Prior messages in a thread, chronological — so a follow-up draft
-    doesn't repeat the initial pitch verbatim and can reference what's
-    already been said (CLAUDE.md §66: the agent may draft follow-ups, it
-    just may never decide anything on the creator's behalf)."""
+def build_reply_classification_context(brand: Brand) -> dict:
+    """Just the brand shape for the Outreach Agent's classify_response job
+    (Part II Phase 7) — no DB access needed, same reasoning as
+    build_outreach_context."""
+    return _brand_to_prompt_dict(brand)
+
+
+async def build_outreach_message_history(db: AsyncSession, thread_id: str) -> list[dict]:
+    """Prior messages in a thread, chronological — used both so a follow-up
+    draft doesn't repeat the initial pitch verbatim, and so a reply
+    extraction has the outbound context a brand's reply is responding to
+    (CLAUDE.md §66: the agent may draft/extract, it just may never decide
+    anything on the creator's behalf)."""
     result = await db.execute(
         select(OutreachMessage).where(OutreachMessage.thread_id == thread_id).order_by(OutreachMessage.created_at)
     )

@@ -4,14 +4,16 @@ Drafts outbound outreach messages (initial pitch, follow-ups) from an
 already-generated campaign brief and the creator's voice — nothing more.
 
 CLAUDE.md §66 is a hard, non-negotiable constraint on this agent
-specifically: it may research, draft, and (starting Phase 7) classify a
-brand's reply, but it may NEVER negotiate, counteroffer, accept, reject,
-promise, or commit anything on the creator's behalf, and it may never write
-to a thread's status/outcome/creator_decision fields — those are written
-only by a route, only in response to an explicit creator action (enforced
-in app/domain/commercial/service.py, not just here). This agent's output
-is always a draft that a human must approve and send themselves
-(CLAUDE.md §70 — draft-only, no send integration exists).
+specifically: it may research, draft, and (Phase 7) classify a brand's
+reply, but it may NEVER negotiate, counteroffer, accept, reject, promise,
+or commit anything on the creator's behalf, and it may never write to a
+thread's status/outcome/creator_decision fields — those are written only
+by a route, only in response to an explicit creator action (enforced in
+app/domain/commercial/service.py, not just here). This agent's output is
+always a draft that a human must approve and send themselves (CLAUDE.md
+§70 — draft-only, no send integration exists), and classify_response's
+output is always a read-only structured summary the creator decides
+what to do with — extraction never implies a decision was made.
 """
 
 from app.agent_service.agents.base import BaseAgent
@@ -50,12 +52,68 @@ Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {"subject": string, "body": string}
 """
 
+CLASSIFY_RESPONSE_SYSTEM_PROMPT = """You are the Outreach Agent inside a \
+Creator Intelligence OS, now extracting structure from a brand's reply to \
+a creator's outreach. You NEVER decide anything here — you only summarize \
+and extract what the brand actually wrote, as neutrally and accurately as \
+possible, for the creator to read and decide on themselves.
+
+You will be given the brand, the prior messages in this thread (what the \
+creator already sent), and the brand's reply text, pasted in verbatim by \
+the creator.
+
+Extract only what the reply actually states. Never infer a specific \
+budget, timeline, or deliverable that wasn't mentioned — leave that field \
+null rather than guessing. `sentiment` is your read of the reply's overall \
+tone toward the partnership (interested/warm, neutral/noncommittal, or \
+declining) — this describes the brand's tone, it is not a recommendation \
+of what the creator should do. `next_steps_from_brand` is what the brand \
+itself asked for or proposed next, if anything. `open_questions` are \
+things the brand asked the creator. `flags` are specific things in the \
+reply worth the creator's attention (e.g. an unusually low or high \
+budget mentioned, a tight deadline, ambiguous terms) — only include one if \
+the reply text actually supports it, phrased as an observation, not \
+advice.
+
+Respond with ONLY a JSON object, no markdown fences, matching exactly:
+{"sentiment": "interested" | "neutral" | "declining", "summary": string, \
+"budget_mentioned": string | null, "timeline_mentioned": string | null, \
+"deliverables_mentioned": string[], "next_steps_from_brand": string | null, \
+"open_questions": string[], "flags": string[], \
+"confidence": "low" | "medium" | "high"}
+"""
+
 
 class OutreachAgent(BaseAgent):
+    """Two jobs, one entrypoint (`run`, dispatched by `job`) — same
+    single-method-per-agent shape as every other multi-job agent in this
+    codebase (e.g. CreatorIntelligenceAgent), since the Orchestrator only
+    ever calls `agent.run(...)`."""
+
     name = "outreach"
     allowed_tools: list[str] = []
 
     async def run(
+        self,
+        context: CreatorStateSnapshot,
+        model_router: ModelRouter,
+        job: str = "draft",
+        brand: dict | None = None,
+        brief: dict | None = None,
+        contact: dict | None = None,
+        kind: str = "initial_pitch",
+        prior_messages: list[dict] | None = None,
+        reply_text: str = "",
+    ) -> AgentOutput:
+        if job == "classify_reply":
+            return await self._classify_response(
+                context, model_router, brand=brand, reply_text=reply_text, prior_messages=prior_messages
+            )
+        return await self._draft(
+            context, model_router, brand=brand, brief=brief, contact=contact, kind=kind, prior_messages=prior_messages
+        )
+
+    async def _draft(
         self,
         context: CreatorStateSnapshot,
         model_router: ModelRouter,
@@ -165,5 +223,97 @@ class OutreachAgent(BaseAgent):
                 }
             ],
             next_action="Review and approve this draft before sending.",
+            warnings=[],
+        )
+
+    async def _classify_response(
+        self,
+        context: CreatorStateSnapshot,
+        model_router: ModelRouter,
+        brand: dict | None = None,
+        reply_text: str = "",
+        prior_messages: list[dict] | None = None,
+    ) -> AgentOutput:
+        """Extracts structure from a pasted-in brand reply — read-only, no
+        decision (CLAUDE.md §66). The extraction is attached to the inbound
+        message it belongs to; it never writes anything to the thread
+        itself (status/outcome/creator_decision stay untouched here)."""
+        brand = brand or {}
+        prior_messages = prior_messages or []
+
+        user_parts = [f"Brand: {brand.get('name')!r} ({brand.get('category')})"]
+        if prior_messages:
+            history_lines = "\n".join(f"[{m['direction']}/{m['kind']}] {m['body'][:300]}" for m in prior_messages)
+            user_parts.append(f"Prior messages in this thread:\n{history_lines}")
+        user_parts.append(f"Brand's reply (pasted in verbatim):\n{reply_text}")
+
+        response, failure = await self._complete_safely(
+            model_router,
+            tier=ModelTier.STANDARD,
+            system=CLASSIFY_RESPONSE_SYSTEM_PROMPT,
+            user="\n\n".join(user_parts),
+            label="Reply extraction",
+            inputs_used=["brand", "reply_text", "prior_messages"],
+            evidence_ids=[],
+        )
+        if failure:
+            return failure
+
+        if response.stub:
+            return AgentOutput(
+                status="success",
+                summary="Reply extraction: skipped (no model provider configured, and extraction has no honest rule-based fallback).",
+                confidence=0.0,
+                inputs_used=["reply_text"],
+                evidence_ids=[],
+                warnings=[
+                    "No ANTHROPIC_API_KEY or GROQ_API_KEY configured — reply extraction needs real "
+                    "reading comprehension, so it was skipped rather than guessed. The reply text "
+                    "itself is still saved."
+                ],
+            )
+
+        try:
+            data = self._parse_json(response.text, required_key="sentiment")
+        except ValueError as exc:
+            return AgentOutput(
+                status="failed",
+                summary="Reply extraction: model response could not be parsed as the expected JSON shape.",
+                confidence=0.0,
+                inputs_used=["reply_text"],
+                evidence_ids=[],
+                warnings=[str(exc)],
+            )
+
+        sentiment = data.get("sentiment")
+        if sentiment not in ("interested", "neutral", "declining"):
+            sentiment = "neutral"
+
+        extracted = {
+            "sentiment": sentiment,
+            "summary": data.get("summary") or "",
+            "budget_mentioned": data.get("budget_mentioned"),
+            "timeline_mentioned": data.get("timeline_mentioned"),
+            "deliverables_mentioned": [d for d in (data.get("deliverables_mentioned") or []) if isinstance(d, str)],
+            "next_steps_from_brand": data.get("next_steps_from_brand"),
+            "open_questions": [q for q in (data.get("open_questions") or []) if isinstance(q, str)],
+            "flags": [f for f in (data.get("flags") or []) if isinstance(f, str)],
+        }
+
+        return AgentOutput(
+            status="success",
+            summary=f"Extracted a {sentiment} reply from {brand.get('name')!r}.",
+            confidence=0.5,
+            inputs_used=["brand", "reply_text", "prior_messages"],
+            evidence_ids=[],
+            proposed_state_changes=[
+                {
+                    "type": "outreach_reply_extraction",
+                    "data": extracted,
+                    "confidence": 0.5,
+                    "evidence_ids": [],
+                }
+            ],
+            next_action="Review the extraction and decide how to proceed.",
             warnings=[],
         )

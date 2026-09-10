@@ -1,11 +1,13 @@
-"""Outreach pipeline (CLAUDE.md §66, §70, Part II Phase 6).
+"""Outreach pipeline (CLAUDE.md §66, §70, Part II Phase 6-7).
 
-Draft-only, human-in-the-loop: the Outreach Agent drafts; a message must be
+Draft-only, human-in-the-loop: the Outreach Agent drafts and (Phase 7)
+extracts structure from a pasted-in brand reply; a message must be
 explicitly approved and then explicitly marked sent by the creator, both
-gated in app/domain/commercial/service.py (not just here). Nothing in this
-file ever writes to a thread's outcome/creator_decision fields — those
-belong to a future creator-decision route (Phase 7), never to an agent and
-never to a status-mechanics route like this one (CLAUDE.md §66).
+gated in app/domain/commercial/service.py (not just here). The single
+exception to "nothing here writes outcome/creator_decision" is
+record_decision_route below, and it is the ONLY route in the whole app
+that may (CLAUDE.md §66) — it exists solely to record an explicit creator
+action, never an agent's judgment.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,7 +16,8 @@ from app.agent_service.agents.outreach import OutreachAgent
 from app.agent_service.context.builder import (
     build_creator_state_snapshot,
     build_outreach_context,
-    build_outreach_followup_context,
+    build_outreach_message_history,
+    build_reply_classification_context,
 )
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
@@ -22,6 +25,7 @@ from app.api.deps import DbSession, get_owned_creator, validate_or_502
 from app.domain.commercial.models import Brand, OutreachThread
 from app.domain.commercial.service import (
     add_outreach_message,
+    apply_extracted_data,
     approve_outreach_message,
     get_brand,
     get_brand_contact,
@@ -32,14 +36,19 @@ from app.domain.commercial.service import (
     list_outreach_messages,
     list_outreach_threads,
     mark_outreach_message_sent,
+    record_brand_reply,
+    record_creator_decision,
 )
 from app.domain.creator.models import Creator
 from app.schemas.commercial import (
+    CreatorDecisionRequest,
     DraftFollowUpResponse,
     OutreachMessageRead,
     OutreachPipelineItem,
     OutreachThreadDetail,
     OutreachThreadRead,
+    RecordBrandReplyRequest,
+    RecordBrandReplyResponse,
 )
 
 router = APIRouter(prefix="/creators/{creator_id}/outreach", tags=["outreach"])
@@ -154,7 +163,7 @@ async def draft_follow_up_route(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No campaign brief found for this thread's opportunity.")
 
     outreach_context = build_outreach_context(brand, brief, contact)
-    prior_messages = await build_outreach_followup_context(db, thread_id)
+    prior_messages = await build_outreach_message_history(db, thread_id)
     creator_snapshot = await build_creator_state_snapshot(db, creator)
 
     orchestrator = Orchestrator(db=db, model_router=get_model_router())
@@ -195,3 +204,88 @@ async def draft_follow_up_route(
     )
     await db.commit()
     return DraftFollowUpResponse(message=validate_or_502(OutreachMessageRead, message, label="Outreach"), warnings=output.warnings)
+
+
+@router.post("/{thread_id}/messages", response_model=RecordBrandReplyResponse, status_code=201)
+async def record_brand_reply_route(
+    thread_id: str,
+    payload: RecordBrandReplyRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> RecordBrandReplyResponse:
+    """The creator pastes in the brand's reply verbatim (no inbound email
+    integration exists — CLAUDE.md §70). The reply is always recorded even
+    if extraction fails or is skipped in stub mode (CLAUDE.md §43): losing
+    the creator's own evidence to an agent hiccup would be worse than an
+    unclassified reply. Everything that could still fail (thread state,
+    brand resolution) is checked *before* the reply is written, so a
+    client-visible error always means nothing was saved — never "saved,
+    but the request still reports failure"."""
+    thread = await _get_owned_thread(db, creator, thread_id)
+    if thread.status not in ("sent", "replied"):
+        # A reply only makes sense once the pitch has actually gone out —
+        # same reasoning as draft_follow_up_route's precondition.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Cannot record a reply on thread status {thread.status!r} (expected 'sent' or 'replied').",
+        )
+    brand = await _get_thread_brand(db, creator, thread)
+    # Fetched before the new reply is written, so it doesn't include (and
+    # then redundantly re-describe, truncated) the very reply being
+    # classified below.
+    prior_messages = await build_outreach_message_history(db, thread_id)
+
+    message = await record_brand_reply(db, thread_id=thread_id, body=payload.body, subject=payload.subject)
+    await db.commit()
+    await db.refresh(message)
+
+    reply_context = build_reply_classification_context(brand)
+    creator_snapshot = await build_creator_state_snapshot(db, creator)
+
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    output = await orchestrator.run_agent(
+        agent=OutreachAgent(),
+        creator_id=creator.id,
+        workflow_name="outreach_reply_extraction",
+        context=creator_snapshot,
+        job="classify_reply",
+        brand=reply_context,
+        reply_text=payload.body,
+        prior_messages=prior_messages,
+    )
+
+    warnings = list(output.warnings)
+    if output.status == "success":
+        for change in output.proposed_state_changes:
+            if change.get("type") == "outreach_reply_extraction":
+                message = await apply_extracted_data(db, message_id=message.id, extracted_data=change["data"])
+    else:
+        warnings.append(output.summary)
+    # Unconditional — same convention as every sibling route (score/brief/
+    # follow-up): commits the AgentRun/AgentMessage observability rows
+    # (CLAUDE.md §44) regardless of whether extraction produced a usable
+    # change, not just on the lucky path.
+    await db.commit()
+    await db.refresh(message)
+
+    return RecordBrandReplyResponse(message=validate_or_502(OutreachMessageRead, message, label="Outreach"), warnings=warnings)
+
+
+@router.patch("/{thread_id}/decision", response_model=OutreachThreadRead)
+async def record_decision_route(
+    thread_id: str,
+    payload: CreatorDecisionRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> OutreachThreadRead:
+    """The only place in the app that writes creator_decision/outcome
+    (CLAUDE.md §66) — always an explicit creator action, never an agent's
+    output."""
+    thread = await _get_owned_thread(db, creator, thread_id)
+    try:
+        thread = await record_creator_decision(db, thread_id=thread_id, decision=payload.decision, note=payload.note)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await db.commit()
+    await db.refresh(thread)
+    return thread

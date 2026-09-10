@@ -73,6 +73,13 @@ async def _create_thread_and_draft_message(creator_id, opportunity_id, kind="ini
     return thread_id, message_id
 
 
+async def _create_sent_thread(client, creator_id, opportunity_id, headers):
+    thread_id, message_id = await _create_thread_and_draft_message(creator_id, opportunity_id)
+    await client.patch(f"/creators/{creator_id}/outreach/{thread_id}/messages/{message_id}/approve", headers=headers)
+    await client.patch(f"/creators/{creator_id}/outreach/{thread_id}/messages/{message_id}/mark-sent", headers=headers)
+    return thread_id
+
+
 async def test_create_outreach_thread_in_stub_mode_returns_no_thread(client):
     """No ANTHROPIC/GROQ key in the test environment — drafting has no
     honest rule-based fallback, so nothing is persisted, mirroring
@@ -243,4 +250,114 @@ async def test_outreach_routes_are_scoped_to_owning_creator(client):
     assert resp.status_code == 404
 
     resp = await client.post(f"/creators/{creator_b}/brand-opportunities/{opportunity_id}/outreach", json={}, headers=headers_b)
+    assert resp.status_code == 404
+
+
+async def test_record_brand_reply_in_stub_mode_still_saves_the_reply(client):
+    """No ANTHROPIC/GROQ key — extraction is skipped, but the reply itself
+    (plain data entry, not intelligence) must still be saved (CLAUDE.md
+    §43: never lose the creator's own evidence to an agent hiccup)."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route14@example.com", name="O14")
+    headers = {"X-Debug-User-Id": user_id}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_id, headers)
+    thread_id = await _create_sent_thread(client, creator_id, opportunity_id, headers)
+
+    resp = await client.post(
+        f"/creators/{creator_id}/outreach/{thread_id}/messages",
+        json={"body": "We're interested, what's your rate?"},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["message"]["body"] == "We're interested, what's your rate?"
+    assert body["message"]["direction"] == "inbound"
+    assert body["message"]["extracted_data"] is None
+    assert len(body["warnings"]) > 0
+
+    # And the thread advanced to 'replied'.
+    detail = await client.get(f"/creators/{creator_id}/outreach/{thread_id}", headers=headers)
+    assert detail.json()["thread"]["status"] == "replied"
+    assert len(detail.json()["messages"]) == 2
+
+
+async def test_record_brand_reply_unknown_thread_is_404(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route15@example.com", name="O15")
+    headers = {"X-Debug-User-Id": user_id}
+
+    resp = await client.post(
+        f"/creators/{creator_id}/outreach/othread_missing/messages", json={"body": "hi"}, headers=headers
+    )
+    assert resp.status_code == 404
+
+
+async def test_record_brand_reply_before_pitch_sent_is_400(client):
+    """A reply only makes sense once the pitch has actually gone out —
+    same reasoning as the follow-up route's precondition."""
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route21@example.com", name="O21")
+    headers = {"X-Debug-User-Id": user_id}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_id, headers)
+    thread_id, _ = await _create_thread_and_draft_message(creator_id, opportunity_id)
+
+    resp = await client.post(f"/creators/{creator_id}/outreach/{thread_id}/messages", json={"body": "hi"}, headers=headers)
+    assert resp.status_code == 400
+
+
+async def test_record_decision_accept_updates_thread(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route16@example.com", name="O16")
+    headers = {"X-Debug-User-Id": user_id}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_id, headers)
+    thread_id = await _create_sent_thread(client, creator_id, opportunity_id, headers)
+
+    resp = await client.patch(
+        f"/creators/{creator_id}/outreach/{thread_id}/decision",
+        json={"decision": "accept", "note": "Great fit for the audience"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "won"
+    assert body["outcome"] == "deal_confirmed"
+    assert body["creator_decision"] == "accept"
+    assert body["creator_decision_note"] == "Great fit for the audience"
+    assert body["decided_at"] is not None
+
+
+async def test_record_decision_rejects_unrecognized_value(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route17@example.com", name="O17")
+    headers = {"X-Debug-User-Id": user_id}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_id, headers)
+    thread_id = await _create_sent_thread(client, creator_id, opportunity_id, headers)
+
+    resp = await client.patch(
+        f"/creators/{creator_id}/outreach/{thread_id}/decision",
+        json={"decision": "sign_the_contract"},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+
+async def test_record_decision_unknown_thread_is_404(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="outreach-route18@example.com", name="O18")
+    headers = {"X-Debug-User-Id": user_id}
+
+    resp = await client.patch(
+        f"/creators/{creator_id}/outreach/othread_missing/decision", json={"decision": "accept"}, headers=headers
+    )
+    assert resp.status_code == 404
+
+
+async def test_reply_and_decision_routes_are_scoped_to_owning_creator(client):
+    creator_a, user_a = await _create_creator_and_get_user_id(client, email="outreach-route19@example.com", name="A19")
+    creator_b, user_b = await _create_creator_and_get_user_id(client, email="outreach-route20@example.com", name="B20")
+    headers_a = {"X-Debug-User-Id": user_a}
+    headers_b = {"X-Debug-User-Id": user_b}
+    _, opportunity_id = await _score_and_brief_a_brand(client, creator_a, headers_a)
+    thread_id = await _create_sent_thread(client, creator_a, opportunity_id, headers_a)
+
+    resp = await client.post(f"/creators/{creator_b}/outreach/{thread_id}/messages", json={"body": "hi"}, headers=headers_b)
+    assert resp.status_code == 404
+
+    resp = await client.patch(
+        f"/creators/{creator_b}/outreach/{thread_id}/decision", json={"decision": "accept"}, headers=headers_b
+    )
     assert resp.status_code == 404
