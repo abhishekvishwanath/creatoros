@@ -7,6 +7,7 @@ from app.api.routes import (
     commercial,
     content,
     creators,
+    experiments,
     health,
     learnings,
     opportunities,
@@ -30,6 +31,7 @@ api_router.include_router(calendar.capacity_router)
 api_router.include_router(performance.router)
 api_router.include_router(performance.overview_router)
 api_router.include_router(learnings.router)
+api_router.include_router(experiments.router)
 api_router.include_router(commercial.router)
 api_router.include_router(brands.router)
 api_router.include_router(brands.radar_router)

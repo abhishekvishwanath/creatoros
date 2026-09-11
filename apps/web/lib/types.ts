@@ -652,3 +652,67 @@ export interface LearningRead {
   status: string;
   scope: string;
 }
+
+export interface ExperimentCreate {
+  hypothesis: string;
+  variable?: string;
+  control_reference?: string;
+  planned_test_set?: unknown[];
+  start_date?: string;
+  end_date?: string;
+}
+
+export interface ExperimentStatsEntry {
+  test_n: number;
+  control_n: number;
+  test_median: number | null;
+  control_median: number | null;
+  adequate_evidence: boolean;
+  delta?: number;
+  pct_delta?: number | null;
+}
+
+export interface ExperimentRead {
+  id: string;
+  hypothesis: string;
+  variable: string | null;
+  control_reference: string | null;
+  planned_test_set: unknown[] | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: "planned" | "running" | "completed" | "abandoned";
+  results: Record<string, ExperimentStatsEntry> | null;
+  confidence: "low" | "medium" | "high" | null;
+  conclusion: string | null;
+  next_action: string | null;
+  created_at: string;
+}
+
+export type ExperimentStatus = "running" | "completed" | "abandoned";
+
+export interface ExperimentResultCreate {
+  content_item_id?: string;
+  metric_name: string;
+  metric_value: number;
+  group: "test" | "control";
+}
+
+export interface ExperimentResultRead {
+  id: string;
+  content_item_id: string | null;
+  metric_name: string;
+  metric_value: number;
+  group: string;
+  created_at: string;
+}
+
+export interface ExperimentDetailRead {
+  experiment: ExperimentRead;
+  results: ExperimentResultRead[];
+}
+
+export interface EvaluateExperimentResponse {
+  experiment: ExperimentRead | null;
+  stats: Record<string, ExperimentStatsEntry>;
+  warnings: string[];
+}

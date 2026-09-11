@@ -26,6 +26,13 @@ import type {
   CreatorStateSnapshot,
   DiagnoseResponse,
   DraftFollowUpResponse,
+  EvaluateExperimentResponse,
+  ExperimentCreate,
+  ExperimentDetailRead,
+  ExperimentRead,
+  ExperimentResultCreate,
+  ExperimentResultRead,
+  ExperimentStatus,
   GenerateBriefResponse,
   GenerateCampaignBriefResponse,
   GenerateOpportunitiesResponse,
@@ -420,5 +427,40 @@ export function retractLearning(creatorId: string, learningId: string) {
   return request<LearningRead>(`/creators/${creatorId}/learnings/${learningId}`, {
     method: "PATCH",
     body: JSON.stringify({ status: "retracted" }),
+  });
+}
+
+export function createExperiment(creatorId: string, payload: ExperimentCreate) {
+  return request<ExperimentRead>(`/creators/${creatorId}/experiments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listExperiments(creatorId: string) {
+  return request<ExperimentRead[]>(`/creators/${creatorId}/experiments`);
+}
+
+export function getExperimentDetail(creatorId: string, experimentId: string) {
+  return request<ExperimentDetailRead>(`/creators/${creatorId}/experiments/${experimentId}`);
+}
+
+export function updateExperimentStatus(creatorId: string, experimentId: string, status: ExperimentStatus) {
+  return request<ExperimentRead>(`/creators/${creatorId}/experiments/${experimentId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function addExperimentResult(creatorId: string, experimentId: string, payload: ExperimentResultCreate) {
+  return request<ExperimentResultRead>(`/creators/${creatorId}/experiments/${experimentId}/results`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function evaluateExperiment(creatorId: string, experimentId: string) {
+  return request<EvaluateExperimentResponse>(`/creators/${creatorId}/experiments/${experimentId}/evaluate`, {
+    method: "POST",
   });
 }

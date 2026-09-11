@@ -1,27 +1,37 @@
-"""Learning Engine (CLAUDE.md §31, §54 item 15).
+"""Experimentation + Learning Engine (CLAUDE.md §30-31, §54 item 15).
 
-Converts performance diagnoses into persistent, evidence-linked
-`StrategicLearning` rows — the mechanism CLAUDE.md §60 calls "next week's
-strategy already knows what happened last week."
+Two related but distinct jobs live in this module, matching the domain
+package's two model groups (app/domain/experiments/models.py):
 
-This is deliberately NOT an LLM agent. A diagnosis's `associated_factors`
-are already the model's qualitative read of *one* post; turning that into a
-durable, creator-wide belief is a statistical aggregation job (cluster
-recurring factors, count corroborating evidence, threshold on sample size),
-not a reasoning job — CLAUDE.md §53 says to prefer a module over a new
-agent identity when there's no reasoning gap to fill, and letting a model
-"decide" whether a factor has enough evidence would just reintroduce the
-opaque-number problem CLAUDE.md §20 already ruled out for ratios.
+1. Experiment CRUD + evaluation (CLAUDE.md §30, §11.11 Experimentation
+   Agent): a creator- or Strategy-Agent-formulated hypothesis, a planned
+   test/control split, and a rule-based statistical comparison (medians,
+   sample sizes — computed here in code, never by a model, CLAUDE.md §20)
+   that the Experimentation Agent then reasons over qualitatively.
 
-Every learning must be traceable to >= MIN_LEARNING_EVIDENCE distinct
-published posts (CLAUDE.md §19/§31: a single post is never grounds for a
-creator-wide rule) and its confidence is derived purely from evidence count
-and the diagnosis-reported per-factor confidence — never invented.
+2. The Learning Engine: converts performance diagnoses into persistent,
+   evidence-linked `StrategicLearning` rows — the mechanism CLAUDE.md §60
+   calls "next week's strategy already knows what happened last week."
+   This half is deliberately NOT an LLM agent. A diagnosis's
+   `associated_factors` are already the model's qualitative read of *one*
+   post; turning that into a durable, creator-wide belief is a statistical
+   aggregation job (cluster recurring factors, count corroborating
+   evidence, threshold on sample size), not a reasoning job — CLAUDE.md
+   §53 says to prefer a module over a new agent identity when there's no
+   reasoning gap to fill, and letting a model "decide" whether a factor
+   has enough evidence would just reintroduce the opaque-number problem
+   CLAUDE.md §20 already ruled out for ratios.
+
+Every learning — whether clustered from performance/commercial evidence or
+promoted directly from one completed experiment — must be traceable to
+real sample size (CLAUDE.md §19/§31: a single post is never grounds for a
+creator-wide rule) and its confidence is derived purely from evidence
+count/statistics, never invented.
 """
 
 import statistics
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -30,8 +40,207 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ids import generate_id
 from app.domain.commercial.models import Brand, BrandOpportunity, OutreachThread
 from app.domain.content.models import ContentItem
-from app.domain.experiments.models import StrategicLearning
+from app.domain.experiments.models import Experiment, ExperimentResult, StrategicLearning
 from app.domain.performance.models import PerformanceSnapshot
+
+# Same rigor as MIN_LEARNING_EVIDENCE below, applied per group: a metric
+# needs at least this many results in *both* the test and control groups
+# before a delta between their medians means anything (CLAUDE.md §19: a
+# tiny sample isn't definitive evidence either way).
+MIN_EXPERIMENT_GROUP_EVIDENCE = 2
+
+
+async def create_experiment(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    hypothesis: str,
+    variable: Optional[str] = None,
+    control_reference: Optional[str] = None,
+    planned_test_set: Optional[list] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> Experiment:
+    experiment = Experiment(
+        id=generate_id("experiment"),
+        creator_id=creator_id,
+        hypothesis=hypothesis,
+        variable=variable,
+        control_reference=control_reference,
+        planned_test_set=planned_test_set,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    db.add(experiment)
+    await db.flush()
+    return experiment
+
+
+async def list_experiments(
+    db: AsyncSession, *, creator_id: str, status_filter: Optional[str] = None
+) -> list[Experiment]:
+    query = select(Experiment).where(Experiment.creator_id == creator_id)
+    if status_filter:
+        query = query.where(Experiment.status == status_filter)
+    query = query.order_by(Experiment.created_at.desc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_experiment(db: AsyncSession, *, creator_id: str, experiment_id: str) -> Optional[Experiment]:
+    result = await db.execute(
+        select(Experiment).where(Experiment.id == experiment_id, Experiment.creator_id == creator_id)
+    )
+    return result.scalar_one_or_none()
+
+
+_EXPERIMENT_STATUS_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    "running": ("planned",),
+    "completed": ("planned", "running"),
+    "abandoned": ("planned", "running"),
+}
+
+
+async def set_experiment_status(db: AsyncSession, *, experiment: Experiment, status: str) -> Experiment:
+    """Manual, creator-driven transitions (mirrors
+    app/domain/content/service.py::mark_content_stage) — a direct user
+    action, so an invalid transition raises rather than silently no-op'ing.
+    `evaluate_experiment` below also sets status to "completed" itself once
+    it has a real conclusion, so this exists mainly for "abandoned" and for
+    starting a "planned" experiment running."""
+    if status not in _EXPERIMENT_STATUS_TRANSITIONS:
+        raise ValueError(f"{status!r} is not a valid experiment status transition target.")
+    allowed_from = _EXPERIMENT_STATUS_TRANSITIONS[status]
+    if experiment.status not in allowed_from:
+        raise ValueError(f"Cannot move to {status!r} from status {experiment.status!r} (expected one of {allowed_from}).")
+    experiment.status = status
+    await db.flush()
+    return experiment
+
+
+async def add_experiment_result(
+    db: AsyncSession,
+    *,
+    experiment_id: str,
+    content_item_id: Optional[str],
+    metric_name: str,
+    metric_value: float,
+    group: str,
+) -> ExperimentResult:
+    result = ExperimentResult(
+        id=generate_id("experiment_result"),
+        experiment_id=experiment_id,
+        content_item_id=content_item_id,
+        metric_name=metric_name,
+        metric_value=metric_value,
+        group=group,
+    )
+    db.add(result)
+    await db.flush()
+    return result
+
+
+async def list_experiment_results(db: AsyncSession, *, experiment_id: str) -> list[ExperimentResult]:
+    result = await db.execute(
+        select(ExperimentResult).where(ExperimentResult.experiment_id == experiment_id).order_by(ExperimentResult.created_at)
+    )
+    return list(result.scalars().all())
+
+
+def compute_experiment_stats(results: list[ExperimentResult]) -> dict[str, dict]:
+    """Rule-based, code-computed comparison of test vs. control groups, one
+    entry per metric_name present (CLAUDE.md §20: a model reasons over
+    numbers it's given as fact, it never invents or recomputes them). Only
+    metrics with at least MIN_EXPERIMENT_GROUP_EVIDENCE results in *both*
+    groups get a delta — an unbalanced or thin comparison would just be
+    noise wearing a stats-shaped label (CLAUDE.md §29 spirit, applied to
+    experiments instead of single-post diagnoses)."""
+    by_metric: dict[str, dict[str, list[float]]] = defaultdict(lambda: {"test": [], "control": []})
+    for r in results:
+        if r.group in ("test", "control"):
+            by_metric[r.metric_name][r.group].append(r.metric_value)
+
+    stats: dict[str, dict] = {}
+    for metric_name, groups in by_metric.items():
+        test_values, control_values = groups["test"], groups["control"]
+        entry = {
+            "test_n": len(test_values),
+            "control_n": len(control_values),
+            "test_median": statistics.median(test_values) if test_values else None,
+            "control_median": statistics.median(control_values) if control_values else None,
+            "adequate_evidence": len(test_values) >= MIN_EXPERIMENT_GROUP_EVIDENCE
+            and len(control_values) >= MIN_EXPERIMENT_GROUP_EVIDENCE,
+        }
+        if entry["test_median"] is not None and entry["control_median"] is not None:
+            entry["delta"] = entry["test_median"] - entry["control_median"]
+            entry["pct_delta"] = (entry["delta"] / entry["control_median"]) if entry["control_median"] else None
+        stats[metric_name] = entry
+    return stats
+
+
+async def apply_experiment_evaluation(
+    db: AsyncSession, *, experiment: Experiment, data: dict, stats: dict, results: list[ExperimentResult]
+) -> Experiment:
+    """Persists the Experimentation Agent's qualitative read (conclusion,
+    confidence, next_action, whether to retain the hypothesis) alongside the
+    code-computed `stats` this module already produced — the model's output
+    is reasoning ABOUT those numbers, never a replacement for them, so both
+    are stored (CLAUDE.md §20). Moves the experiment to "completed": an
+    evaluation is a real conclusion, not a draft (a creator who disagrees
+    can still reopen it via set_experiment_status)."""
+    experiment.results = stats
+    experiment.confidence = data.get("confidence")
+    experiment.conclusion = data.get("conclusion")
+    experiment.next_action = data.get("next_action")
+    if experiment.status not in ("completed", "abandoned"):
+        experiment.status = "completed"
+    await db.flush()
+
+    if data.get("retain_hypothesis"):
+        evidence_ids = sorted({r.content_item_id for r in results if r.content_item_id})
+        await _promote_experiment_to_learning(db, experiment=experiment, evidence_ids=evidence_ids)
+
+    return experiment
+
+
+async def _promote_experiment_to_learning(
+    db: AsyncSession, *, experiment: Experiment, evidence_ids: list[str]
+) -> StrategicLearning:
+    """A completed, retained experiment IS its own evidence unit (its
+    >=MIN_EXPERIMENT_GROUP_EVIDENCE-per-group results already satisfy
+    CLAUDE.md §19's "don't generalize from one post" bar) — unlike
+    sync_learnings/sync_commercial_learnings below, this doesn't cluster
+    across many diagnoses, it promotes one experiment's own conclusion
+    directly. category is keyed to the experiment id so re-evaluating the
+    same experiment updates its learning in place rather than duplicating
+    it (same UniqueConstraint(creator_id, category) as the cluster-based
+    learnings). scope is always "temporary experiment" (CLAUDE.md §5.3/§31)
+    — a single experiment, however well-run, is exactly the kind of
+    knowledge that should stay flagged as provisional rather than be
+    silently upgraded to "creator-wide" the way a multi-post cluster can be."""
+    category = f"experiment/{experiment.id}"
+    result = await db.execute(
+        select(StrategicLearning).where(StrategicLearning.creator_id == experiment.creator_id, StrategicLearning.category == category)
+    )
+    learning = result.scalar_one_or_none()
+    confidence_value = {"low": 0.3, "medium": 0.55, "high": 0.75}.get(experiment.confidence or "", 0.3)
+
+    if learning is None:
+        learning = StrategicLearning(
+            id=generate_id("strategic_learning"),
+            creator_id=experiment.creator_id,
+            category=category,
+            scope="temporary experiment",
+        )
+        db.add(learning)
+
+    learning.statement = experiment.conclusion or experiment.hypothesis
+    learning.confidence = confidence_value
+    learning.evidence_ids = evidence_ids
+    learning.last_validated_at = datetime.now(timezone.utc)
+    learning.status = "active"
+    await db.flush()
+    return learning
 
 MIN_LEARNING_EVIDENCE = 2
 # How far a piece's average baseline ratio must sit from 1.0 (its creator's

@@ -13,6 +13,7 @@ import {
   Dna,
   Building2,
   Send,
+  FlaskConical,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/create", label: "Create", icon: PenSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/experiments", label: "Experiments", icon: FlaskConical },
   { href: "/brands", label: "Brands", icon: Building2 },
   { href: "/outreach", label: "Outreach", icon: Send },
   { href: "/creator-dna", label: "Creator DNA", icon: Dna },
