@@ -141,6 +141,83 @@ async def get_content_item(db: AsyncSession, *, creator_id: str, content_item_id
     return result.scalar_one_or_none()
 
 
+async def list_content_derivatives(
+    db: AsyncSession, *, creator_id: str, source_content_item_id: str
+) -> list[ContentItem]:
+    """The content tree grown from one source asset (CLAUDE.md §25) — every
+    ContentItem the Repurposing Agent has produced from this source so far."""
+    result = await db.execute(
+        select(ContentItem)
+        .where(
+            ContentItem.creator_id == creator_id,
+            ContentItem.source_content_item_id == source_content_item_id,
+        )
+        .order_by(ContentItem.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def get_best_source_text(db: AsyncSession, *, content_item: ContentItem) -> Optional[str]:
+    """The Repurposing Agent's "source truth" text (CLAUDE.md §25: every
+    derivative must preserve it) — a final/critiqued script if one exists
+    (it's been through the writer -> critic loop, so it's the most refined
+    account of the piece), falling back to the raw ingested transcript for
+    content that was never scripted in this app at all."""
+    scripts = await list_scripts(db, content_item_id=content_item.id)
+    for status in ("final", "critiqued", "rewritten", "draft"):
+        for script in reversed(scripts):
+            if script.status == status:
+                return script.body
+    return content_item.transcript
+
+
+async def create_repurposed_content_item(
+    db: AsyncSession,
+    *,
+    creator_id: str,
+    source_item: ContentItem,
+    target_platform: str,
+    target_format: str,
+    title: str,
+    body: str,
+    hook_variants: list[str],
+) -> tuple[ContentItem, Script]:
+    """Creates one derivative in the source asset's content tree (CLAUDE.md
+    §25). Unlike create_content_item_from_opportunity's IDEA/APPROVED start,
+    a derivative is born already SCRIPTED — the Repurposing Agent's job is
+    specifically to adapt existing source truth into a platform-native draft
+    in one step, not to re-run the from-scratch brief -> script pipeline on
+    material that's already been reported and reasoned about once."""
+    item = ContentItem(
+        id=generate_id("content_item"),
+        creator_id=creator_id,
+        title=title,
+        platform=target_platform,
+        format=target_format,
+        topic=source_item.topic,
+        pillar_id=source_item.pillar_id,
+        source_type="repurposed",
+        source_content_item_id=source_item.id,
+        status="SCRIPTED",
+    )
+    db.add(item)
+    await db.flush()
+
+    script = Script(
+        id=generate_id("script"),
+        content_item_id=item.id,
+        brief_id=None,
+        version_number=1,
+        platform=target_platform,
+        body=body,
+        hook_variants=hook_variants,
+        status="draft",
+    )
+    db.add(script)
+    await db.flush()
+    return item, script
+
+
 async def get_content_brief(db: AsyncSession, *, content_item_id: str) -> Optional[ContentBrief]:
     result = await db.execute(select(ContentBrief).where(ContentBrief.content_item_id == content_item_id))
     return result.scalar_one_or_none()

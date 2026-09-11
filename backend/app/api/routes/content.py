@@ -15,8 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.agent_service.agents.content_architect import ContentArchitectAgent
 from app.agent_service.agents.editorial_critic import EditorialCriticAgent
+from app.agent_service.agents.repurposing import RepurposingAgent
 from app.agent_service.agents.script_agent import ScriptAgent
-from app.agent_service.context.builder import build_content_brief_context, build_creator_state_snapshot
+from app.agent_service.context.builder import (
+    build_content_brief_context,
+    build_creator_state_snapshot,
+    build_repurposing_context,
+)
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
 from app.api.deps import DbSession, get_owned_creator, validate_or_502
@@ -26,10 +31,13 @@ from app.domain.content.service import (
     apply_content_brief,
     apply_critique,
     create_content_item_from_opportunity,
+    create_repurposed_content_item,
     create_script,
+    get_best_source_text,
     get_content_brief,
     get_content_item,
     get_script,
+    list_content_derivatives,
     list_scripts,
     mark_content_stage,
     publish_content_item,
@@ -51,6 +59,8 @@ from app.schemas.content import (
     ContentItemRead,
     GenerateBriefResponse,
     GenerateScriptResponse,
+    RepurposeContentRequest,
+    RepurposeContentResponse,
     ReviewScriptRequest,
     ReviewScriptResponse,
     ScriptRead,
@@ -335,6 +345,95 @@ async def mark_recorded(
     await db.commit()
     await db.refresh(item)
     return item
+
+
+@router.get("/{content_item_id}/derivatives", response_model=list[ContentItemRead])
+async def list_derivatives(
+    content_item_id: str,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> list[ContentItem]:
+    """The content tree grown from this source asset so far (CLAUDE.md §25)."""
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    return await list_content_derivatives(db, creator_id=creator.id, source_content_item_id=content_item_id)
+
+
+@router.post("/{content_item_id}/repurpose", response_model=RepurposeContentResponse)
+async def repurpose_content(
+    content_item_id: str,
+    payload: RepurposeContentRequest,
+    db: DbSession,
+    creator: Creator = Depends(get_owned_creator),
+) -> RepurposeContentResponse:
+    """Adapts this item's best available source text (a final/critiqued
+    script, or the raw ingested transcript) into one platform-native
+    derivative (CLAUDE.md §11.9, §25). The derivative is a full ContentItem
+    in its own right, born SCRIPTED, that the creator can independently
+    critique/schedule/publish."""
+    item = await get_content_item(db, creator_id=creator.id, content_item_id=content_item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+
+    source_text = await get_best_source_text(db, content_item=item)
+    if not source_text:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This item has no script or transcript yet — generate a script or ingest a transcript before repurposing it.",
+        )
+
+    snapshot = await build_creator_state_snapshot(db, creator)
+    repurposing_context = build_repurposing_context(item, source_text)
+
+    orchestrator = Orchestrator(db=db, model_router=get_model_router())
+    output = await orchestrator.run_agent(
+        agent=RepurposingAgent(),
+        creator_id=creator.id,
+        workflow_name="repurpose_content",
+        context=snapshot,
+        source_item=repurposing_context["source_item"],
+        source_text=repurposing_context["source_text"],
+        target_platform=payload.target_platform,
+        target_format=payload.target_format,
+    )
+
+    if output.status == "failed":
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail=output.summary + ("; " + "; ".join(output.warnings) if output.warnings else ""),
+        )
+
+    derivative_read = None
+    script_read = None
+    caption_concept = None
+    transformations: list[str] = []
+    for change in output.proposed_state_changes:
+        if change.get("type") == "repurposed_content_create":
+            data = change["data"]
+            derivative, script = await create_repurposed_content_item(
+                db,
+                creator_id=creator.id,
+                source_item=item,
+                target_platform=payload.target_platform,
+                target_format=payload.target_format,
+                title=data.get("title") or item.title or item.topic or "Untitled",
+                body=data.get("body", ""),
+                hook_variants=data.get("hook_variants", []),
+            )
+            derivative_read = validate_or_502(ContentItemRead, derivative, label="Repurposing")
+            script_read = validate_or_502(ScriptRead, script, label="Repurposing")
+            caption_concept = data.get("caption_concept")
+            transformations = data.get("transformations", [])
+
+    await db.commit()
+    return RepurposeContentResponse(
+        derivative=derivative_read,
+        script=script_read,
+        caption_concept=caption_concept,
+        transformations=transformations,
+        warnings=output.warnings,
+    )
 
 
 @router.post("/{content_item_id}/mark-editing", response_model=ContentItemRead)

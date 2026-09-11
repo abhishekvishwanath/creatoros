@@ -17,6 +17,8 @@ import {
   generateBrief,
   generateScript,
   reviewScript,
+  repurposeContent,
+  listContentDerivatives,
   markContentRecorded,
   markContentEditing,
   scheduleContent,
@@ -34,7 +36,17 @@ import type {
   OpportunityRead,
   PerformanceSnapshotCreate,
   PerformanceSnapshotRead,
+  RepurposeContentResponse,
 } from "@/lib/types";
+
+const REPURPOSE_TARGETS: { platform: string; format: string; label: string }[] = [
+  { platform: "instagram", format: "reel", label: "Instagram Reel" },
+  { platform: "tiktok", format: "short", label: "TikTok short" },
+  { platform: "x", format: "thread", label: "X thread" },
+  { platform: "instagram", format: "carousel", label: "Instagram carousel" },
+  { platform: "linkedin", format: "post", label: "LinkedIn post" },
+  { platform: "newsletter", format: "email", label: "Newsletter" },
+];
 
 const METRIC_FIELDS: { key: keyof PerformanceSnapshotCreate; label: string }[] = [
   { key: "views", label: "Views" },
@@ -102,7 +114,17 @@ function CreatePageInner() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [starting, setStarting] = useState<string | null>(null);
   const [busy, setBusy] = useState<
-    "brief" | "script" | "review" | "recorded" | "editing" | "schedule" | "publish" | "metrics" | "diagnose" | null
+    | "brief"
+    | "script"
+    | "review"
+    | "recorded"
+    | "editing"
+    | "schedule"
+    | "publish"
+    | "metrics"
+    | "diagnose"
+    | "repurpose"
+    | null
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -114,6 +136,9 @@ function CreatePageInner() {
   const [metricsForm, setMetricsForm] = useState<Record<string, string>>({});
   const [latestSnapshot, setLatestSnapshot] = useState<PerformanceSnapshotRead | null>(null);
   const [diagnosis, setDiagnosis] = useState<DiagnosisRead | null>(null);
+  const [derivatives, setDerivatives] = useState<ContentItemRead[]>([]);
+  const [repurposeTarget, setRepurposeTarget] = useState(0);
+  const [repurposeResult, setRepurposeResult] = useState<RepurposeContentResponse | null>(null);
 
   const refetchLists = useCallback(async () => {
     const session = getSession();
@@ -143,7 +168,12 @@ function CreatePageInner() {
     if (!session) return;
     setLoadingDetail(true);
     try {
-      setDetail(await getContentDetail(session.creatorId, id));
+      const [detailResult, derivativesResult] = await Promise.all([
+        getContentDetail(session.creatorId, id),
+        listContentDerivatives(session.creatorId, id),
+      ]);
+      setDetail(detailResult);
+      setDerivatives(derivativesResult);
     } finally {
       setLoadingDetail(false);
     }
@@ -189,6 +219,9 @@ function CreatePageInner() {
     setMetricsForm({});
     setLatestSnapshot(null);
     setDiagnosis(null);
+    setDerivatives([]);
+    setRepurposeResult(null);
+    setRepurposeTarget(0);
     router.replace(id ? `/create?item=${id}` : "/create");
   }
 
@@ -264,6 +297,32 @@ function CreatePageInner() {
       const result = await reviewScript(session.creatorId, selectedId, scriptId);
       setWarnings(result.warnings);
       await refetchDetail(selectedId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRepurpose() {
+    const session = getSession();
+    if (!session || !selectedId) return;
+    const target = REPURPOSE_TARGETS[repurposeTarget];
+    setBusy("repurpose");
+    setError(null);
+    setWarnings([]);
+    setRepurposeResult(null);
+    try {
+      const result = await repurposeContent(session.creatorId, selectedId, {
+        target_platform: target.platform,
+        target_format: target.format,
+      });
+      setRepurposeResult(result);
+      setWarnings(result.warnings);
+      if (result.derivative) {
+        const session2 = getSession();
+        if (session2) setDerivatives(await listContentDerivatives(session2.creatorId, selectedId));
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Is the API running?");
     } finally {
@@ -381,6 +440,7 @@ function CreatePageInner() {
     const scripts = detail?.scripts ?? [];
     const latestScript = scripts.length > 0 ? scripts[scripts.length - 1] : null;
     const canReview = latestScript && (latestScript.status === "draft" || latestScript.status === "rewritten");
+    const hasSourceText = !!latestScript || !!item?.transcript;
 
     return (
       <div>
@@ -499,6 +559,78 @@ function CreatePageInner() {
               )}
             </CardContent>
           </Card>
+
+          {item && hasSourceText && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Repurpose</CardTitle>
+                <CardDescription>
+                  Adapt this piece's script into a platform-native derivative (CLAUDE.md §25) — a new,
+                  independent content item you can critique, schedule, and publish on its own.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div>
+                    <label className="block text-xs text-subtle" htmlFor="repurpose-target">Into</label>
+                    <select
+                      id="repurpose-target"
+                      value={repurposeTarget}
+                      onChange={(e) => setRepurposeTarget(Number(e.target.value))}
+                      className="rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-ink"
+                    >
+                      {REPURPOSE_TARGETS.map((t, i) => (
+                        <option key={t.label} value={i}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button onClick={handleRepurpose} disabled={busy !== null}>
+                    <Sparkles className="h-4 w-4" />
+                    {busy === "repurpose" ? "Adapting…" : "Repurpose"}
+                  </Button>
+                </div>
+
+                {repurposeResult?.derivative && repurposeResult.script && (
+                  <div className="space-y-2 rounded-lg border border-border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-ink">{repurposeResult.derivative.title}</p>
+                      <Button variant="ghost" onClick={() => selectItem(repurposeResult.derivative!.id)}>
+                        Open this piece
+                      </Button>
+                    </div>
+                    <p className="whitespace-pre-wrap text-sm text-ink">
+                      {normalizeScriptBody(repurposeResult.script.body)}
+                    </p>
+                    {repurposeResult.transformations.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-subtle">What changed</p>
+                        <ul className="ml-4 list-disc text-sm text-subtle">
+                          {repurposeResult.transformations.map((t, i) => <li key={i}>{t}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {derivatives.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-subtle">Derivatives of this piece</p>
+                    <ul className="divide-y divide-border">
+                      {derivatives.map((d) => (
+                        <li key={d.id} className="flex items-center justify-between py-2">
+                          <span className="text-sm text-ink">{d.title ?? d.topic}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge tone="neutral">{d.platform ?? d.format}</Badge>
+                            <Button variant="ghost" onClick={() => selectItem(d.id)}>Open</Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {item && ["REVIEW", "RECORDED", "EDITING", "SCHEDULED", "PUBLISHED"].includes(item.status) && (
             <Card>

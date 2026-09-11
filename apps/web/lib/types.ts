@@ -132,6 +132,7 @@ export interface ContentItemRead {
   transcript: string | null;
   opportunity_id: string | null;
   pillar_id: string | null;
+  source_content_item_id: string | null;
   created_at: string;
 }
 
@@ -194,6 +195,19 @@ export interface GenerateScriptResponse {
 export interface ReviewScriptResponse {
   reviewed: ScriptRead | null;
   rewrite: ScriptRead | null;
+  warnings: string[];
+}
+
+export interface RepurposeContentRequest {
+  target_platform: string;
+  target_format: string;
+}
+
+export interface RepurposeContentResponse {
+  derivative: ContentItemRead | null;
+  script: ScriptRead | null;
+  caption_concept: string | null;
+  transformations: string[];
   warnings: string[];
 }
 

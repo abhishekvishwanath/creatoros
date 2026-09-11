@@ -315,6 +315,23 @@ async def build_performance_context(db: AsyncSession, content_item: ContentItem)
     }
 
 
+def build_repurposing_context(source_item: ContentItem, source_text: str | None) -> dict:
+    """Task-specific context for the Repurposing Agent: the source item's own
+    fields plus its resolved "source truth" text (app/domain/content/service.py
+    ::get_best_source_text — a final/critiqued script if one exists, else the
+    raw ingested transcript). No DB access needed here; the route already has
+    both in hand."""
+    return {
+        "source_item": {
+            "id": source_item.id,
+            "topic": source_item.topic,
+            "platform": source_item.platform,
+            "format": source_item.format,
+        },
+        "source_text": source_text,
+    }
+
+
 def _brand_to_prompt_dict(brand: Brand) -> dict:
     """Shared brand shape handed to every commercial-loop agent prompt
     (Brand Intelligence, Campaign Intelligence) — one place to change what

@@ -52,9 +52,19 @@ class ContentItem(Base, TimestampMixin, CreatorScopedMixin):
         String, ForeignKey("opportunities.id", ondelete="SET NULL"), nullable=True
     )
 
-    source_type: Mapped[str] = mapped_column(String, default="created")  # ingested | created
+    source_type: Mapped[str] = mapped_column(String, default="created")  # ingested | created | repurposed
     transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     topic: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # Set only when source_type == "repurposed" (CLAUDE.md §25 content tree:
+    # "1 YouTube video -> 3 Reels -> 1 Carousel -> ..."). SET NULL rather than
+    # CASCADE on the source's deletion: a derivative that's already been
+    # scripted/scheduled/published is real, independent content in its own
+    # right and shouldn't vanish just because its source asset was later
+    # removed (CLAUDE.md §15 spirit — don't erase state on a side effect).
+    source_content_item_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("content_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
 
 class ContentVersion(Base, TimestampMixin):

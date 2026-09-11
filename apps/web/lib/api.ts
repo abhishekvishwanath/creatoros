@@ -44,6 +44,8 @@ import type {
   PublishContentRequest,
   PublishContentResponse,
   RecordBrandReplyResponse,
+  RepurposeContentRequest,
+  RepurposeContentResponse,
   ResearchSignalCreate,
   ResearchSignalRead,
   ReviewScriptResponse,
@@ -151,6 +153,21 @@ export function reviewScript(creatorId: string, contentItemId: string, scriptId:
     method: "POST",
     body: JSON.stringify({ script_id: scriptId }),
   });
+}
+
+export function repurposeContent(
+  creatorId: string,
+  contentItemId: string,
+  payload: RepurposeContentRequest
+) {
+  return request<RepurposeContentResponse>(`/creators/${creatorId}/content/${contentItemId}/repurpose`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listContentDerivatives(creatorId: string, contentItemId: string) {
+  return request<ContentItemRead[]>(`/creators/${creatorId}/content/${contentItemId}/derivatives`);
 }
 
 export function createResearchSignal(creatorId: string, payload: ResearchSignalCreate) {

@@ -5,9 +5,12 @@ from app.domain.content.service import (
     apply_content_brief,
     apply_critique,
     create_content_item_from_opportunity,
+    create_repurposed_content_item,
     create_script,
+    get_best_source_text,
     get_content_brief,
     get_content_item,
+    list_content_derivatives,
     list_scripts,
 )
 from app.domain.creator.models import AudienceSegment, Creator, User
@@ -243,3 +246,97 @@ async def test_apply_critique_sets_final_when_passed_and_critiqued_when_not():
         script = result.scalar_one()
     assert script.status == "final"
     assert script.critic_score == 90
+
+
+async def test_get_best_source_text_prefers_final_script_over_transcript():
+    creator_id = await _make_creator()
+    async with AsyncSessionLocal() as session:
+        item = ContentItem(
+            id="cnt_source1", creator_id=creator_id, topic="budgeting", transcript="raw transcript text"
+        )
+        session.add(item)
+        session.add(
+            Script(id="scr_source1", content_item_id="cnt_source1", version_number=1, body="final script body", status="final")
+        )
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        item = await get_content_item(session, creator_id=creator_id, content_item_id="cnt_source1")
+        text = await get_best_source_text(session, content_item=item)
+    assert text == "final script body"
+
+
+async def test_get_best_source_text_falls_back_to_transcript_with_no_scripts():
+    creator_id = await _make_creator()
+    async with AsyncSessionLocal() as session:
+        session.add(ContentItem(id="cnt_source2", creator_id=creator_id, topic="budgeting", transcript="raw transcript text"))
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        item = await get_content_item(session, creator_id=creator_id, content_item_id="cnt_source2")
+        text = await get_best_source_text(session, content_item=item)
+    assert text == "raw transcript text"
+
+
+async def test_create_repurposed_content_item_links_to_source_and_is_scripted():
+    creator_id = await _make_creator()
+    async with AsyncSessionLocal() as session:
+        source = ContentItem(id="cnt_source3", creator_id=creator_id, topic="budgeting", pillar_id=None)
+        session.add(source)
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        source = await get_content_item(session, creator_id=creator_id, content_item_id="cnt_source3")
+        derivative, script = await create_repurposed_content_item(
+            session,
+            creator_id=creator_id,
+            source_item=source,
+            target_platform="x",
+            target_format="thread",
+            title="Budgeting thread",
+            body="1/ Here's the thing about budgeting...",
+            hook_variants=["hook a", "hook b"],
+        )
+        await session.commit()
+        derivative_id = derivative.id
+
+    async with AsyncSessionLocal() as session:
+        fetched = await get_content_item(session, creator_id=creator_id, content_item_id=derivative_id)
+        scripts = await list_scripts(session, content_item_id=derivative_id)
+    assert fetched.source_content_item_id == "cnt_source3"
+    assert fetched.source_type == "repurposed"
+    assert fetched.status == "SCRIPTED"
+    assert fetched.topic == "budgeting"
+    assert len(scripts) == 1
+    assert scripts[0].body == "1/ Here's the thing about budgeting..."
+    assert scripts[0].brief_id is None
+
+
+async def test_list_content_derivatives_returns_only_this_source_tree():
+    creator_id = await _make_creator()
+    async with AsyncSessionLocal() as session:
+        source = ContentItem(id="cnt_source4", creator_id=creator_id, topic="budgeting")
+        other = ContentItem(id="cnt_source5", creator_id=creator_id, topic="saving")
+        session.add_all([source, other])
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        source = await get_content_item(session, creator_id=creator_id, content_item_id="cnt_source4")
+        await create_repurposed_content_item(
+            session,
+            creator_id=creator_id,
+            source_item=source,
+            target_platform="instagram",
+            target_format="reel",
+            title="Reel 1",
+            body="body",
+            hook_variants=[],
+        )
+        await session.commit()
+
+    async with AsyncSessionLocal() as session:
+        derivatives = await list_content_derivatives(session, creator_id=creator_id, source_content_item_id="cnt_source4")
+        other_derivatives = await list_content_derivatives(session, creator_id=creator_id, source_content_item_id="cnt_source5")
+    assert len(derivatives) == 1
+    assert derivatives[0].source_content_item_id == "cnt_source4"
+    assert other_derivatives == []

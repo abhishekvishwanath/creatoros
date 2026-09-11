@@ -104,3 +104,64 @@ async def test_content_pipeline_enforces_tenant_isolation(client):
     creator_id, _ = await _create_creator_and_get_user_id(client, email="kira@example.com", name="Kira")
     resp = await client.get(f"/creators/{creator_id}/content/cnt_missing", headers={"X-Debug-User-Id": "usr_someone_else"})
     assert resp.status_code == 404
+
+
+async def test_repurpose_without_source_text_is_409(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="lena@example.com", name="Lena")
+    headers = {"X-Debug-User-Id": user_id}
+    ingest_resp = await client.post(
+        f"/creators/{creator_id}/content",
+        json={"title": "No transcript video", "platform": "youtube", "format": "long", "topic": "budgeting"},
+        headers=headers,
+    )
+    content_item_id = ingest_resp.json()["id"]
+
+    resp = await client.post(
+        f"/creators/{creator_id}/content/{content_item_id}/repurpose",
+        json={"target_platform": "x", "target_format": "thread"},
+        headers=headers,
+    )
+    assert resp.status_code == 409
+
+
+async def test_repurpose_in_stub_mode_skips_rather_than_guesses(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="milo@example.com", name="Milo")
+    headers = {"X-Debug-User-Id": user_id}
+    ingest_resp = await client.post(
+        f"/creators/{creator_id}/content",
+        json={
+            "title": "Budgeting deep dive",
+            "platform": "youtube",
+            "format": "long",
+            "topic": "budgeting",
+            "transcript": "Full transcript about the envelope budgeting method with three examples.",
+        },
+        headers=headers,
+    )
+    content_item_id = ingest_resp.json()["id"]
+
+    resp = await client.post(
+        f"/creators/{creator_id}/content/{content_item_id}/repurpose",
+        json={"target_platform": "x", "target_format": "thread"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["derivative"] is None
+    assert any("skipped" in w.lower() or "not configured" in w.lower() for w in body["warnings"])
+
+    derivatives_resp = await client.get(f"/creators/{creator_id}/content/{content_item_id}/derivatives", headers=headers)
+    assert derivatives_resp.status_code == 200
+    assert derivatives_resp.json() == []
+
+
+async def test_repurpose_unknown_content_item_is_404(client):
+    creator_id, user_id = await _create_creator_and_get_user_id(client, email="nia@example.com", name="Nia")
+    headers = {"X-Debug-User-Id": user_id}
+
+    resp = await client.post(
+        f"/creators/{creator_id}/content/cnt_missing/repurpose",
+        json={"target_platform": "x", "target_format": "thread"},
+        headers=headers,
+    )
+    assert resp.status_code == 404

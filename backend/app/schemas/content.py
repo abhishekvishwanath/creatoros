@@ -26,6 +26,7 @@ class ContentItemRead(BaseModel):
     transcript: Optional[str] = None
     opportunity_id: Optional[str] = None
     pillar_id: Optional[str] = None
+    source_content_item_id: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -108,4 +109,17 @@ class ReviewScriptRequest(BaseModel):
 class ReviewScriptResponse(BaseModel):
     reviewed: Optional[ScriptRead] = None
     rewrite: Optional[ScriptRead] = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RepurposeContentRequest(BaseModel):
+    target_platform: str
+    target_format: str
+
+
+class RepurposeContentResponse(BaseModel):
+    derivative: Optional[ContentItemRead] = None
+    script: Optional[ScriptRead] = None
+    caption_concept: Optional[str] = None
+    transformations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
