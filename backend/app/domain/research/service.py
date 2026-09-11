@@ -3,7 +3,8 @@ manual research-signal submission or the Opportunity Engine Agent's proposals
 take into the database.
 """
 
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import desc, select
@@ -13,7 +14,21 @@ from sqlalchemy.orm import selectinload
 from app.core.ids import generate_id
 from app.domain.content.models import ContentPillar
 from app.domain.creator.models import CreatorPreference
-from app.domain.research.models import Opportunity, OpportunityEvidence, ResearchSignal, ResearchSource
+from app.domain.research.models import (
+    Opportunity,
+    OpportunityEvidence,
+    ResearchSignal,
+    ResearchSource,
+    TrendInsight,
+)
+
+# Windows for CLAUDE.md §11.4's momentum/saturation reasoning (CLAUDE.md
+# §20: computed here in code, never invented by a model). "Recent" vs.
+# "prior" are equal-length adjacent windows so a straight count comparison
+# is apples-to-apples regardless of how bursty a creator's own signal
+# ingestion habits are.
+TREND_RECENT_WINDOW_DAYS = 14
+TREND_PRIOR_WINDOW_DAYS = 14
 
 
 async def ingest_research_signal(db: AsyncSession, *, creator_id: str, data: dict) -> ResearchSignal:
@@ -172,3 +187,105 @@ async def update_opportunity_status(
 
     await db.flush()
     return opportunity
+
+
+def _topic_key(topic: str) -> str:
+    return " ".join(topic.strip().lower().split())
+
+
+async def compute_topic_momentum(db: AsyncSession, *, creator_id: str) -> dict[str, dict]:
+    """Groups this creator's own ingested research signals by topic and
+    computes, purely from counts and timestamps already in the database,
+    whether each topic is rising/stable/declining/new — the "is this a real
+    trend or noise" half of CLAUDE.md §11.4 that doesn't need any real
+    judgment, so it isn't a model call (CLAUDE.md §53). The Trend
+    Intelligence Agent reasons over this as given fact; it never recomputes
+    or contradicts it (CLAUDE.md §20)."""
+    result = await db.execute(select(ResearchSignal).where(ResearchSignal.creator_id == creator_id, ResearchSignal.topic.isnot(None)))
+    signals = list(result.scalars().all())
+
+    now = datetime.now(timezone.utc)
+    recent_cutoff = now - timedelta(days=TREND_RECENT_WINDOW_DAYS)
+    prior_cutoff = recent_cutoff - timedelta(days=TREND_PRIOR_WINDOW_DAYS)
+
+    by_topic: dict[str, dict] = defaultdict(lambda: {"topic": None, "signal_ids": [], "recent": 0, "prior": 0})
+    for s in signals:
+        key = _topic_key(s.topic)
+        entry = by_topic[key]
+        entry["topic"] = entry["topic"] or s.topic
+        entry["signal_ids"].append(s.id)
+        created_at = s.created_at if s.created_at.tzinfo else s.created_at.replace(tzinfo=timezone.utc)
+        if created_at >= recent_cutoff:
+            entry["recent"] += 1
+        elif created_at >= prior_cutoff:
+            entry["prior"] += 1
+
+    stats: dict[str, dict] = {}
+    for key, entry in by_topic.items():
+        recent, prior = entry["recent"], entry["prior"]
+        if prior == 0 and recent > 0:
+            momentum = "new"
+        elif prior > 0 and recent > prior * 1.3:
+            momentum = "rising"
+        elif prior > 0 and recent < prior * 0.7:
+            momentum = "declining"
+        else:
+            momentum = "stable"
+        stats[key] = {
+            "topic": entry["topic"],
+            "signal_count": len(entry["signal_ids"]),
+            "recent_signal_count": recent,
+            "momentum": momentum,
+            "signal_ids": entry["signal_ids"],
+        }
+    return stats
+
+
+async def upsert_trend_insights(
+    db: AsyncSession, *, creator_id: str, stats: dict[str, dict], agent_insights: list[dict]
+) -> list[TrendInsight]:
+    """Upserts one TrendInsight per topic the agent actually returned an
+    insight for, keyed by (creator_id, topic_key) so re-running analysis
+    updates existing rows rather than accumulating duplicates (same pattern
+    as StrategicLearning's category uniqueness). A topic_key not present in
+    `stats` is dropped rather than trusted — the model must never introduce
+    a topic beyond what it was given (CLAUDE.md §3.6/§17.3: no hallucinated
+    research)."""
+    existing_result = await db.execute(select(TrendInsight).where(TrendInsight.creator_id == creator_id))
+    existing_by_key = {t.topic_key: t for t in existing_result.scalars().all()}
+
+    now = datetime.now(timezone.utc)
+    updated: list[TrendInsight] = []
+    for insight in agent_insights:
+        key = _topic_key(insight.get("topic_key") or insight.get("topic") or "")
+        stat = stats.get(key)
+        if stat is None:
+            continue
+
+        row = existing_by_key.get(key)
+        if row is None:
+            row = TrendInsight(id=generate_id("trend_insight"), creator_id=creator_id, topic_key=key)
+            db.add(row)
+
+        row.topic = stat["topic"]
+        row.signal_count = stat["signal_count"]
+        row.recent_signal_count = stat["recent_signal_count"]
+        row.momentum = stat["momentum"]
+        row.saturation_estimate = insight.get("saturation_estimate")
+        row.durability = insight.get("durability")
+        row.relevance_to_creator = insight.get("relevance_to_creator")
+        row.reasoning = insight.get("reasoning")
+        row.evidence_signal_ids = stat["signal_ids"]
+        row.confidence = {"low": 0.3, "medium": 0.55, "high": 0.75}.get(insight.get("confidence") or "", 0.3)
+        row.analyzed_at = now
+        updated.append(row)
+
+    await db.flush()
+    return updated
+
+
+async def list_trend_insights(db: AsyncSession, *, creator_id: str) -> list[TrendInsight]:
+    result = await db.execute(
+        select(TrendInsight).where(TrendInsight.creator_id == creator_id).order_by(desc(TrendInsight.signal_count))
+    )
+    return list(result.scalars().all())

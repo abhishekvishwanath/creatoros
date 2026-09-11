@@ -73,3 +73,25 @@ class GenerateOpportunitiesResponse(BaseModel):
 
 class OpportunityStatusUpdate(BaseModel):
     status: Literal["approved", "rejected", "saved_for_later", "used"]
+
+
+class TrendInsightRead(BaseModel):
+    id: str
+    topic: str
+    signal_count: int
+    recent_signal_count: int
+    momentum: str
+    saturation_estimate: Optional[str] = None
+    durability: Optional[str] = None
+    relevance_to_creator: Optional[str] = None
+    reasoning: Optional[str] = None
+    evidence_signal_ids: list[str] = Field(default_factory=list)
+    confidence: Optional[float] = None
+    analyzed_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AnalyzeTrendsResponse(BaseModel):
+    insights: list[TrendInsightRead] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

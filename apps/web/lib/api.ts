@@ -1,6 +1,7 @@
 import type {
   AnalyzeAudienceResponse,
   AnalyzeCreatorResponse,
+  AnalyzeTrendsResponse,
   AudienceSignalCreate,
   AudienceSignalRead,
   BottleneckRead,
@@ -61,6 +62,7 @@ import type {
   ScoreBrandOpportunityResponse,
   StrategyRead,
   StrategyStatus,
+  TrendInsightRead,
 } from "./types";
 import { getSession } from "./session";
 
@@ -463,4 +465,12 @@ export function evaluateExperiment(creatorId: string, experimentId: string) {
   return request<EvaluateExperimentResponse>(`/creators/${creatorId}/experiments/${experimentId}/evaluate`, {
     method: "POST",
   });
+}
+
+export function listTrendInsights(creatorId: string) {
+  return request<TrendInsightRead[]>(`/creators/${creatorId}/research/trends`);
+}
+
+export function analyzeTrends(creatorId: string) {
+  return request<AnalyzeTrendsResponse>(`/creators/${creatorId}/research/trends/analyze`, { method: "POST" });
 }

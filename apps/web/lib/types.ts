@@ -716,3 +716,23 @@ export interface EvaluateExperimentResponse {
   stats: Record<string, ExperimentStatsEntry>;
   warnings: string[];
 }
+
+export interface TrendInsightRead {
+  id: string;
+  topic: string;
+  signal_count: number;
+  recent_signal_count: number;
+  momentum: "rising" | "stable" | "declining" | "new";
+  saturation_estimate: "low" | "medium" | "high" | null;
+  durability: "temporary_spike" | "durable" | "unclear" | null;
+  relevance_to_creator: "low" | "medium" | "high" | null;
+  reasoning: string | null;
+  evidence_signal_ids: string[];
+  confidence: number | null;
+  analyzed_at: string | null;
+}
+
+export interface AnalyzeTrendsResponse {
+  insights: TrendInsightRead[];
+  warnings: string[];
+}

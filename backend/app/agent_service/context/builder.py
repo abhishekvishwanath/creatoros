@@ -33,6 +33,7 @@ from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
 from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
+from app.domain.research.service import compute_topic_momentum
 from app.domain.strategy.service import list_available_opportunities
 from app.schemas.commercial import CommercialProfileRead
 from app.schemas.creator import (
@@ -330,6 +331,47 @@ def build_repurposing_context(source_item: ContentItem, source_text: str | None)
         },
         "source_text": source_text,
     }
+
+
+TREND_ANALYSIS_MAX_TOPICS = 10
+TREND_ANALYSIS_MAX_SUMMARIES_PER_TOPIC = 5
+
+
+async def build_trend_analysis_context(db: AsyncSession, *, creator_id: str) -> tuple[dict[str, dict], list[dict]]:
+    """Task-specific context for the Trend Intelligence Agent: the full,
+    code-computed momentum stats for every topic (app/domain/research/
+    service.py::compute_topic_momentum — what gets persisted for every
+    topic with any signals) plus a bounded, prompt-ready slice of the top
+    TREND_ANALYSIS_MAX_TOPICS by signal_count with a few representative
+    signal summaries each (CLAUDE.md §10: never dump everything into a
+    model call)."""
+    stats = await compute_topic_momentum(db, creator_id=creator_id)
+    top_keys = sorted(stats.keys(), key=lambda k: stats[k]["signal_count"], reverse=True)[:TREND_ANALYSIS_MAX_TOPICS]
+
+    all_signal_ids = [
+        sid for key in top_keys for sid in stats[key]["signal_ids"][:TREND_ANALYSIS_MAX_SUMMARIES_PER_TOPIC]
+    ]
+    summaries_by_id: dict[str, str] = {}
+    if all_signal_ids:
+        sig_result = await db.execute(select(ResearchSignal).where(ResearchSignal.id.in_(all_signal_ids)))
+        for sig in sig_result.scalars().all():
+            summaries_by_id[sig.id] = (sig.content_features or {}).get("summary", "")
+
+    prompt_topics = []
+    for key in top_keys:
+        entry = stats[key]
+        sample_ids = entry["signal_ids"][:TREND_ANALYSIS_MAX_SUMMARIES_PER_TOPIC]
+        prompt_topics.append(
+            {
+                "topic_key": key,
+                "topic": entry["topic"],
+                "signal_count": entry["signal_count"],
+                "recent_signal_count": entry["recent_signal_count"],
+                "momentum": entry["momentum"],
+                "summaries": [summaries_by_id[sid] for sid in sample_ids if summaries_by_id.get(sid)],
+            }
+        )
+    return stats, prompt_topics
 
 
 def _brand_to_prompt_dict(brand: Brand) -> dict:

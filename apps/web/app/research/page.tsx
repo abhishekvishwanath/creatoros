@@ -1,11 +1,12 @@
 "use client";
 
-import { Compass, TrendingUp, LayoutGrid } from "lucide-react";
+import { TrendingUp, LayoutGrid } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ResearchSignalsCard } from "@/components/research-signals-card";
 import { AudienceSignalsCard } from "@/components/audience-signals-card";
+import { TrendsCard } from "@/components/trends-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 
 const SECTIONS = [
@@ -14,12 +15,6 @@ const SECTIONS = [
     description: "What's moving across your niche right now.",
     icon: TrendingUp,
     empty: "Live web research isn't connected yet.",
-  },
-  {
-    title: "Emerging topics",
-    description: "Momentum building before it saturates.",
-    icon: Compass,
-    empty: "Topic momentum tracking isn't connected yet.",
   },
   {
     title: "Content gaps",
@@ -38,6 +33,7 @@ export default function ResearchPage() {
       <div className="grid grid-cols-1 gap-4 p-8 md:grid-cols-2">
         <ResearchSignalsCard signals={state?.current_research_signals ?? []} onIngested={refetch} />
         <AudienceSignalsCard />
+        <TrendsCard />
 
         {SECTIONS.map((s) => (
           <Card key={s.title}>

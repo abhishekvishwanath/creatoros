@@ -32,6 +32,7 @@ PREFIXES = {
     "research_signal": "sig",
     "opportunity": "opp",
     "opportunity_evidence": "ev",
+    "trend_insight": "trend",
     "strategy": "strat",
     "strategy_item": "strati",
     "performance_metric": "perf",

@@ -5,7 +5,7 @@ in the UI (CLAUDE.md 3.4, 16)."""
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import generate_id
@@ -56,6 +56,37 @@ class ResearchSignal(Base, TimestampMixin, CreatorScopedMixin):
     hook_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     topic_cluster: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     evidence_quality: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class TrendInsight(Base, TimestampMixin, CreatorScopedMixin):
+    """Trend Intelligence Agent output (CLAUDE.md §11.4, §17.3). One row per
+    topic cluster (keyed by a lowercased topic_key so a re-run updates the
+    existing row rather than accumulating duplicates, same pattern as
+    StrategicLearning's creator_id+category uniqueness). momentum/
+    signal_count/recent_signal_count are always code-computed (CLAUDE.md
+    §20 — never a model-invented number); saturation_estimate/durability/
+    relevance_to_creator/reasoning are the model's qualitative read over
+    those given numbers."""
+
+    __tablename__ = "trend_insights"
+    __table_args__ = (UniqueConstraint("creator_id", "topic_key", name="uq_trend_insights_creator_topic"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: generate_id("trend_insight"))
+    topic_key: Mapped[str] = mapped_column(String)
+    topic: Mapped[str] = mapped_column(String)
+    signal_count: Mapped[int] = mapped_column(Integer, default=0)
+    recent_signal_count: Mapped[int] = mapped_column(Integer, default=0)
+    # rising | stable | declining | new — code-computed (see
+    # app/domain/research/service.py::compute_topic_momentum)
+    momentum: Mapped[str] = mapped_column(String)
+    saturation_estimate: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # low | medium | high
+    # temporary_spike | durable | unclear
+    durability: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    relevance_to_creator: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # low | medium | high
+    reasoning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_signal_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    analyzed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Opportunity(Base, TimestampMixin, CreatorScopedMixin):
