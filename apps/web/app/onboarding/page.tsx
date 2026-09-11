@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createCreator, ApiError } from "@/lib/api";
-import { setSession } from "@/lib/session";
+import { setSession, isAuthenticated, onAuthReady } from "@/lib/session";
+import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 
 export default function OnboardingPage() {
@@ -14,12 +15,22 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    // Real mode requires signing in first (identity comes from the session,
+    // not a typed email) — dev mode has no such concept, this page itself
+    // is the bootstrap.
+    if (!supabase) return;
+    onAuthReady(() => {
+      if (!isAuthenticated()) router.replace("/login");
+    });
+  }, [router]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const creator = await createCreator({ email, name, niche: niche || undefined });
+      const creator = await createCreator({ email: supabase ? undefined : email, name, niche: niche || undefined });
       setSession({ userId: creator.user_id, creatorId: creator.id, creatorName: creator.name });
       router.replace("/");
     } catch (err) {
@@ -39,17 +50,19 @@ export default function OnboardingPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-ink">Email</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="you@example.com"
-            />
-          </div>
+          {!supabase && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-ink">Email</label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
+                placeholder="you@example.com"
+              />
+            </div>
+          )}
           <div>
             <label className="mb-1 block text-sm font-medium text-ink">Name</label>
             <input

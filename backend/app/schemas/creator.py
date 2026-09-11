@@ -7,7 +7,11 @@ from app.schemas.commercial import CommercialProfileRead
 
 
 class CreatorCreate(BaseModel):
-    email: EmailStr
+    # Optional: identity normally comes from the authenticated session (a
+    # Supabase Bearer token, or X-Debug-User-Id). Only used as a dev/test
+    # bootstrap fallback when neither credential is present and real auth
+    # isn't configured — see app/api/routes/creators.py::create_creator.
+    email: Optional[EmailStr] = None
     name: str
     niche: Optional[str] = None
     sub_niche: Optional[str] = None
@@ -34,10 +38,11 @@ class CreatorRead(BaseModel):
 
 
 class CreatorCreateResponse(CreatorRead):
-    """Onboarding-only response. Surfaces user_id so the frontend can hold onto
-    it as the dev-mode X-Debug-User-Id credential (see app/api/deps.py TODO) —
-    once real Supabase Auth is wired up, the session cookie/JWT replaces this
-    and user_id no longer needs to appear in any API response."""
+    """Onboarding-only response. Surfaces user_id for the dev/test
+    X-Debug-User-Id bootstrap path (see app/api/deps.py::get_current_user_id)
+    — a real Supabase-authenticated frontend already has its own identity
+    from the session and doesn't need this field, but it's harmless to
+    include either way."""
 
     user_id: str
 

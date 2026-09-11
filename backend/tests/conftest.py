@@ -13,6 +13,15 @@ os.environ.setdefault(
 os.environ["ANTHROPIC_API_KEY"] = ""
 os.environ["GROQ_API_KEY"] = ""
 
+# Same hermeticity requirement as above, applied to auth (CLAUDE.md §46): a
+# real SUPABASE_URL in the developer's backend/.env would otherwise flip
+# app/api/deps.py::get_current_user_id into requiring a real Supabase Bearer
+# token, breaking every test's X-Debug-User-Id dev/test path. SUPABASE_URL
+# (not SUPABASE_JWT_SECRET) is the actual gate — see get_current_user_id's
+# docstring for why.
+os.environ["SUPABASE_URL"] = ""
+os.environ["SUPABASE_JWT_SECRET"] = ""
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient

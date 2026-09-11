@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
+    # Project Settings -> API -> JWT Settings ("JWT Secret", legacy HS256
+    # signing key every Supabase project has unless asymmetric signing keys
+    # have been explicitly opted into). Verifying Supabase-issued access
+    # tokens locally with this avoids a network round-trip to Supabase's
+    # JWKS endpoint on every request. Empty means real auth isn't
+    # configured yet — see app/api/deps.py::get_current_user_id, which
+    # falls back to the X-Debug-User-Id dev/test path in that case (same
+    # "graceful degrade when unconfigured" precedent as ModelRouter, §12).
+    supabase_jwt_secret: str = ""
 
     # Two interchangeable model providers (CLAUDE.md §12: "model providers ...
     # can change" — agent code talks to ModelRouter.complete(), never to a

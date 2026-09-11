@@ -16,9 +16,65 @@ from app.domain.creator.models import (
     AudienceSignal,
     CreatorPreference,
     CreatorProfile,
+    User,
     VoiceProfile,
 )
 from app.domain.shared.versioned_profile import apply_versioned_profile_update, get_current_versioned_profile
+
+
+async def resolve_or_provision_user(db: AsyncSession, *, supabase_auth_id: str, email: str) -> User:
+    """Auth identity resolution (CLAUDE.md §46): maps a verified Supabase
+    access token's claims to our own User row, auto-provisioning one on a
+    creator's very first authenticated request rather than requiring a
+    separate signup-sync step. Matches by supabase_auth_id first; falls
+    back to matching by email so a User row created under the pre-auth
+    dev/test bootstrap path (find-or-create by email, see
+    app/api/routes/creators.py) links up with its real identity the first
+    time that same person authenticates for real, instead of getting a
+    second, disconnected User row.
+
+    Commits immediately (unlike every other function in this module) — this
+    runs inside app/api/deps.py::get_current_user_id, a dependency shared by
+    read-only routes that never call db.commit() themselves. Without an
+    explicit commit here, a newly provisioned user would be silently rolled
+    back at the end of any GET-only request, and the same person would get
+    a fresh, different user_id every time until they happened to hit a
+    write route — breaking every ownership check in between.
+    """
+    result = await db.execute(select(User).where(User.supabase_auth_id == supabase_auth_id))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        return user
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        user.supabase_auth_id = supabase_auth_id
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    user = User(id=generate_id("user"), email=email, supabase_auth_id=supabase_auth_id)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def find_or_create_user_by_email(db: AsyncSession, *, email: str) -> User:
+    """Dev/test-only identity bootstrap, used by POST /creators only when no
+    credential (Bearer token or X-Debug-User-Id) is present at all *and*
+    real auth isn't configured (settings.supabase_jwt_secret is empty) —
+    see app/api/routes/creators.py::create_creator. Once real auth is
+    configured, this path is unreachable; resolve_or_provision_user above
+    handles every authenticated request instead."""
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is None:
+        user = User(id=generate_id("user"), email=email)
+        db.add(user)
+        await db.flush()
+    return user
 
 # CLAUDE.md §5.2 lists "Operational Capacity" as its own creator state
 # domain, and §26 says capacity should be part of planning. It's stored as

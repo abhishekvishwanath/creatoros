@@ -64,7 +64,7 @@ import type {
   StrategyStatus,
   TrendInsightRead,
 } from "./types";
-import { getSession } from "./session";
+import { getAuthHeaders } from "./session";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -77,14 +77,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const session = getSession();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    ...(await getAuthHeaders()),
     ...(init?.headers as Record<string, string> | undefined),
   };
-  if (session) {
-    headers["X-Debug-User-Id"] = session.userId;
-  }
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (!res.ok) {
@@ -95,7 +92,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export interface CreateCreatorPayload {
-  email: string;
+  // Only used by the dev-mode bootstrap fallback (no Supabase configured) —
+  // a real, authenticated request already carries identity in its session,
+  // so this is ignored server-side whenever a credential is present.
+  email?: string;
   name: string;
   niche?: string;
   sub_niche?: string;
@@ -109,6 +109,10 @@ export function createCreator(payload: CreateCreatorPayload) {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function listMyCreators() {
+  return request<CreatorRead[]>("/creators");
 }
 
 export function getCreator(creatorId: string) {

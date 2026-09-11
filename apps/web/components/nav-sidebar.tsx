@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
 import {
   Home,
@@ -14,7 +14,10 @@ import {
   Building2,
   Send,
   FlaskConical,
+  LogOut,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { clearSession } from "@/lib/session";
 
 const NAV_ITEMS = [
   { href: "/", label: "Home", icon: Home },
@@ -31,6 +34,13 @@ const NAV_ITEMS = [
 
 export function NavSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    if (supabase) await supabase.auth.signOut();
+    clearSession();
+    router.replace("/login");
+  }
 
   return (
     <aside className="flex h-screen w-56 flex-col border-r border-border bg-white px-3 py-4">
@@ -60,6 +70,15 @@ export function NavSidebar() {
           );
         })}
       </nav>
+      {supabase && (
+        <button
+          onClick={handleSignOut}
+          className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-subtle transition-colors hover:bg-zinc-100 hover:text-ink"
+        >
+          <LogOut className="h-4 w-4" strokeWidth={1.75} />
+          Sign out
+        </button>
+      )}
     </aside>
   );
 }

@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 
 from app.agent_service.context.builder import build_creator_state_snapshot, build_voice_analysis_transcripts
 from app.agent_service.model_router.router import get_model_router
 from app.agent_service.orchestrator.orchestrator import Orchestrator
 from app.agent_service.agents.creator_intelligence import CreatorIntelligenceAgent
-from app.api.deps import DbSession, get_owned_creator
+from app.api.deps import DbSession, get_current_user_id, get_owned_creator
+from app.core.config import get_settings
 from app.domain.content.service import sync_content_pillars
-from app.domain.creator.models import Creator, User
-from app.domain.creator.service import apply_creator_profile_update, apply_voice_profile_update
+from app.domain.creator.models import Creator
+from app.domain.creator.service import apply_creator_profile_update, apply_voice_profile_update, find_or_create_user_by_email
 from app.schemas.creator import (
     AnalyzeCreatorResponse,
     CreatorCreate,
@@ -21,23 +24,34 @@ router = APIRouter(prefix="/creators", tags=["creators"])
 
 
 @router.post("", response_model=CreatorCreateResponse, status_code=201)
-async def create_creator(payload: CreatorCreate, db: DbSession) -> Creator:
-    """Onboarding entry point (CLAUDE.md 33 Phase 1). Finds or creates the
-    owning user by email, then creates a new Creator entity under them.
-
-    TODO(auth): once Supabase Auth is wired up, the user will already exist
-    (created at signup) and this endpoint will just attach a Creator to the
-    authenticated user instead of finding/creating by email.
+async def create_creator(
+    payload: CreatorCreate,
+    db: DbSession,
+    authorization: Optional[str] = Header(default=None),
+    x_debug_user_id: Optional[str] = Header(default=None, alias="X-Debug-User-Id"),
+) -> Creator:
+    """Onboarding entry point (CLAUDE.md 33 Phase 1): creates a new Creator
+    entity under the calling user. Resolves that user the normal
+    authenticated way (a Supabase Bearer token, or X-Debug-User-Id when real
+    auth isn't configured — see app/api/deps.py::get_current_user_id) with
+    one additional fallback: if no credential is present at all *and* real
+    auth isn't configured, find-or-create the user by the given email. That
+    fallback is what lets local dev and the automated test suite bootstrap
+    a brand-new identity from nothing but an email, exactly like before this
+    route required authentication at all; it's unreachable once
+    SUPABASE_URL is actually set.
     """
-    result = await db.execute(select(User).where(User.email == payload.email))
-    user = result.scalar_one_or_none()
-    if user is None:
-        user = User(email=payload.email)
-        db.add(user)
-        await db.flush()
+    settings = get_settings()
+    try:
+        user_id = await get_current_user_id(db, authorization=authorization, x_debug_user_id=x_debug_user_id)
+    except HTTPException:
+        if settings.supabase_url or not payload.email:
+            raise
+        user = await find_or_create_user_by_email(db, email=payload.email)
+        user_id = user.id
 
     creator = Creator(
-        user_id=user.id,
+        user_id=user_id,
         name=payload.name,
         niche=payload.niche,
         sub_niche=payload.sub_niche,
@@ -50,6 +64,16 @@ async def create_creator(payload: CreatorCreate, db: DbSession) -> Creator:
     await db.commit()
     await db.refresh(creator)
     return creator
+
+
+@router.get("", response_model=list[CreatorRead])
+async def list_my_creators(db: DbSession, user_id: str = Depends(get_current_user_id)) -> list[Creator]:
+    """Lets a returning, already-authenticated user find their existing
+    creator(s) instead of localStorage being the only record of which
+    creator belongs to them (CLAUDE.md §46) — a fresh browser/device with a
+    valid Supabase session should never be forced back through onboarding."""
+    result = await db.execute(select(Creator).where(Creator.user_id == user_id).order_by(Creator.created_at))
+    return list(result.scalars().all())
 
 
 @router.get("/{creator_id}", response_model=CreatorRead)

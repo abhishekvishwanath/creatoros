@@ -60,8 +60,11 @@ the same FastAPI backend, per CLAUDE.md §56 ("avoid unnecessary microservices")
 
 2. **Frontend env**: copy `apps/web/.env.example` to `apps/web/.env.local` and fill in:
    - `NEXT_PUBLIC_API_URL` — where the FastAPI backend runs (default `http://localhost:8000`)
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — leave blank for now; see
-     Status below on the dev-mode auth stand-in
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase Project
+     Settings → API. Leave both blank to run in dev-mode auth instead (a local placeholder
+     identity, no Supabase project needed at all) — see Status below. Setting these also
+     requires setting `SUPABASE_URL` in `backend/.env` (step 1) for the backend to verify
+     the resulting sessions; without both halves set together, requests will fail auth.
 
 3. **Local Postgres (optional, before Supabase is ready)**:
    ```
@@ -122,19 +125,30 @@ historical sequencing, not a list of what's still outstanding.
   model name in agent code), Context Builder (`agent_service/context/builder.py` — bounded,
   task-specific snapshots, never a full DB dump), and strict `AgentOutput` contracts
   (`agent_service/schemas/contracts.py`) enforced at the route layer via `validate_or_502`.
-- **Agents implemented**: Creator Intelligence, Audience Intelligence, Opportunity Engine,
-  Strategy Engine, Content Architect, Script Agent, Editorial Critic, Performance
-  Intelligence — plus the commercial-loop agents below. Each is a real `agent.run()` with
-  its own prompt, evidence handling, and proposed-state-change shape, not a placeholder.
+- **Agents implemented**: Creator Intelligence, Audience Intelligence, Trend Intelligence,
+  Opportunity Engine, Strategy Engine, Content Architect, Script Agent, Editorial Critic,
+  Repurposing Agent, Performance Intelligence, Experimentation Agent — plus the
+  commercial-loop agents below. Each is a real `agent.run()` with its own prompt, evidence
+  handling, and proposed-state-change shape, not a placeholder.
 - **Full pipelines wired through the API and UI**: onboarding → `/creators/{id}/analyze`
   (Creator DNA: positioning, voice, audience, pillars) → research signal / audience signal
-  ingestion → Opportunity Engine (scored, evidence-linked, components shown) → Strategy
-  Engine (weekly portfolio) → Content pipeline (brief → script → editorial critique →
-  rewrite → schedule/publish, CLAUDE.md §24) → performance ingestion → diagnosis → Learning
-  Engine (evidence-gated clustering into `StrategicLearning`, never a single-post rule).
+  ingestion → Trend Intelligence (momentum computed in code, saturation/durability/
+  relevance judged by the model) → Opportunity Engine (scored, evidence-linked, components
+  shown) → Strategy Engine (weekly portfolio) → Content pipeline (brief → script →
+  editorial critique → rewrite → schedule/publish → Repurposing Agent for platform-native
+  derivatives, CLAUDE.md §24/§25) → performance ingestion → diagnosis → Learning Engine
+  (evidence-gated clustering into `StrategicLearning`) → Experimentation (hypothesis →
+  test/control results → evaluated verdict, promoted into that same learning table).
+- **Auth**: real Supabase Auth (email/password), wired end to end — `apps/web/app/login`,
+  JWT verification in `backend/app/api/deps.py::get_current_user_id` against the project's
+  public JWKS (falls back to a legacy HS256 `SUPABASE_JWT_SECRET` for older projects that
+  haven't moved to asymmetric signing keys), user auto-provisioning on first authenticated
+  request. Gracefully degrades to the original `X-Debug-User-Id` dev/test path whenever
+  `SUPABASE_URL` isn't configured, so local dev and the test suite need zero Supabase setup
+  — same precedent as `ModelRouter` falling back to stub mode with no API key.
 - **Frontend**: Research, Opportunities, Create, Calendar (folds in Strategy), Analytics,
-  and Creator DNA pages all call real endpoints and render real state, with honest empty
-  states where a creator has no data yet — not fabricated placeholders.
+  Experiments, Home, and Creator DNA pages all call real endpoints and render real state,
+  with honest empty states where a creator has no data yet — not fabricated placeholders.
 
 ### Commercial Intelligence loop (Part II) — built
 
@@ -152,49 +166,29 @@ historical sequencing, not a list of what's still outstanding.
 - Frontend: `Brands` and `Outreach` pages, Analytics page filters learnings by
   content vs. commercial.
 
-### Known gaps / stale spots
-
-- **Home dashboard** (`apps/web/app/page.tsx`) still renders hard-coded "not connected
-  yet" empty states for opportunities/strategy/performance even though those endpoints now
-  return real data — it hasn't been rewired since those subsystems landed. Every other
-  page was updated; this one was missed.
-
-**Auth**: Supabase Auth is the intended final auth provider, but isn't wired into the
-frontend yet. Until then, `POST /creators` finds-or-creates a `User` by email and the
-frontend stores the returned `user_id` in `localStorage`, sending it as `X-Debug-User-Id`
-on every request (see `backend/app/api/deps.py` and `apps/web/lib/session.ts` — both
-clearly marked `TODO(auth)`). Tenant isolation itself is real and tested; only the
-identity-proving mechanism is a placeholder.
-
 ## What's still missing for a real end-to-end prototype
 
-Everything below is a genuine gap, not a nitpick — see the assistant's summary in-session
-for the fuller reasoning on each:
+Everything below is a genuine gap, not a nitpick:
 
-1. Real auth (Supabase Auth wired into the frontend, JWT verification replacing
-   `X-Debug-User-Id`).
-2. Home dashboard rewired to real opportunity/strategy/performance data (see above).
-3. Any platform/API ingestion — content, research signals, audience signals, and
+1. Any platform/API ingestion — content, research signals, audience signals, and
    performance are 100% manual entry today; no YouTube/Instagram/X/Reddit connector exists
    (this is a documented, deliberate MVP choice per CLAUDE.md §69, not an oversight, but a
    prototype a real creator uses daily will hit this wall fast).
-4. Semantic memory: the `content_embeddings` pgvector table exists in the schema but
+2. Semantic memory: the `content_embeddings` pgvector table exists in the schema but
    nothing writes or queries it — no embedding generation, no similarity search. Context
    retrieval today is entirely "most recent N rows," not semantic.
-5. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
+3. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
    exists.
-6. Research Agent and Trend Intelligence Agent (CLAUDE.md §11.3–11.4) don't exist as
-   agents — research signal ingestion has no normalization, cross-platform aggregation, or
-   momentum/saturation analysis behind it, just storage of what's typed in.
-7. Repurposing Agent/engine (§11.9, §25) is not built — no source-asset-to-derivatives
-   pipeline.
-8. Experimentation: `Experiment`/`ExperimentResult` tables exist in the schema but have no
-   service, route, or agent — there's no way to create or track a hypothesis-driven test
-   today. The Learning Engine only does passive, after-the-fact clustering of performance
-   diagnoses.
-9. No CI (no `.github/workflows`), no deployment config for Vercel/Railway.
-10. `.env.example` model names (`claude-opus-4-1`, `claude-sonnet-4-5`, `claude-haiku-4-5`)
-    are out of date relative to the current Claude model family — low-risk since model
-    identity is config-only, but worth updating before relying on the Anthropic path.
-11. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
-    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
+4. Research Agent (CLAUDE.md §11.3) doesn't exist as a live cross-platform fetcher — Trend
+   Intelligence now reasons over signals once they're in the system (momentum/saturation/
+   durability/relevance), but nothing goes and finds those signals itself; that's still
+   gated on #1 above.
+5. No CI-enforced deployment (`.github/workflows` runs tests + build on every push, but
+   there's no Vercel/Railway deploy config yet).
+6. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
+   baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
+
+Shipped since the last pass over this list (all with passing unit/integration tests and a
+live smoke test against a real Supabase project, not just mocked): Home dashboard rewire,
+Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, and real Supabase
+Auth.
