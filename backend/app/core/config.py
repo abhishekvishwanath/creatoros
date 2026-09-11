@@ -28,9 +28,9 @@ class Settings(BaseSettings):
 
     # Anthropic model names per tier (CLAUDE.md 12: strategic synthesis,
     # standard reasoning, bulk/fast classification).
-    model_strategic_anthropic: str = "claude-opus-4-1"
-    model_standard_anthropic: str = "claude-sonnet-4-5"
-    model_fast_anthropic: str = "claude-haiku-4-5"
+    model_strategic_anthropic: str = "claude-opus-5"
+    model_standard_anthropic: str = "claude-sonnet-5"
+    model_fast_anthropic: str = "claude-haiku-4-5-20251001"
 
     # Groq model names per tier — free-tier open-source models. Verified
     # live against Groq's current catalog (it changes over time; re-check

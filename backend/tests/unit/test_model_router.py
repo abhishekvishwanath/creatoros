@@ -34,7 +34,7 @@ def test_model_for_resolves_per_active_provider():
     assert router._model_for(ModelTier.STANDARD) == "qwen/qwen3.8-27b"
 
     router = ModelRouter(_settings(anthropic_api_key="sk-ant-test"))
-    assert router._model_for(ModelTier.STANDARD) == "claude-sonnet-4-5"
+    assert router._model_for(ModelTier.STANDARD) == "claude-sonnet-5"
 
 
 @pytest.mark.asyncio

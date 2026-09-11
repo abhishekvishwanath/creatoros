@@ -15,7 +15,13 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# ConfigParser (which backs alembic.config.Config) treats "%" as its own
+# interpolation escape character, so a DATABASE_URL with a percent-encoded
+# password segment (e.g. Supabase passwords containing "@" become "%40")
+# raises "invalid interpolation syntax" unless the literal "%" is doubled
+# first - this doesn't change the URL alembic actually connects with, only
+# how it survives ConfigParser's own escaping.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
