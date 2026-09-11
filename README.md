@@ -42,7 +42,8 @@ the same FastAPI backend, per CLAUDE.md §56 ("avoid unnecessary microservices")
 - Node.js 20+ and npm for `/apps/web`
 - Python 3.11+ for `/backend`
 - A Supabase project (Postgres + pgvector + Auth) — see Setup below
-- An Anthropic API key — see Setup below
+- An Anthropic or Groq API key (either works — see Setup below; this environment runs on
+  Groq's `openai/gpt-oss-120b`, a strong free-tier model)
 - Docker (optional, for local Postgres+pgvector before Supabase is wired up)
 
 ## Setup
@@ -186,25 +187,72 @@ historical sequencing, not a list of what's still outstanding.
   Creator DNA page) lets a creator query across everything embedded so far by meaning, not
   keyword.
 
+### The auto-pipeline: "paste a link, every engine starts" — built
+
+- `POST /creators/{id}/pipeline/run` (optionally with a YouTube URL) runs, as one background
+  task: YouTube import → Creator Intelligence (positioning/voice/pillars) → a real
+  research-signal auto-seed (see below) → Trend Intelligence → Opportunity Engine → Strategy
+  Engine. `GET /creators/{id}/pipeline/run/{run_id}` polls per-stage status; the frontend
+  (onboarding, and a "Run all engines" button on Home) renders this as a live stage list
+  (`components/pipeline-progress.tsx`), not a fake progress bar.
+- **Closes the README's former Research Agent gap**: `app/domain/ingestion/youtube_search.py`
+  pulls real, current search results from YouTube (unauthenticated, same technique as channel
+  resolution) for the creator's niche/content pillars, and writes them as real `ResearchSignal`
+  rows with real source URLs — this is what makes Opportunity Engine and Trend Intelligence
+  able to run immediately after an import instead of requiring a creator to hand-paste
+  signals first (both agents correctly refuse to run on zero evidence, CLAUDE.md §3.4).
+- **Model provider**: Groq's `openai/gpt-oss-120b` (STRATEGIC/STANDARD tiers) and
+  `openai/gpt-oss-20b` (FAST) — a real model is now configured by default in this
+  environment's `backend/.env`, not stub mode. Live-verified end to end: real signup → real
+  YouTube import (15 videos) → real Creator DNA → 5 real research signals → real trend
+  insight → 4 real scored opportunities with evidence links, full run in ~48s.
+
+## Deployment
+
+Live (Hobby/free tiers — expect cold starts and platform rate limits, not production SLAs):
+
+- **Frontend**: Vercel — `https://web-alpha-lovat-31.vercel.app`, auto-deploys on push to
+  `main` (GitHub integration connected via `vercel link`).
+- **Backend**: Railway — `https://creatoros-production-fe16.up.railway.app`, deployed via
+  `railway up` from `/backend` (see `backend/railway.json` / `backend/Procfile` for the
+  start command — Railway's Railpack builder needs one of these to find `uvicorn`). Points
+  at the same Supabase Postgres as local dev; no separate production database.
+- Redeploy backend: `cd backend && npx -y @railway/cli up --service creatoros --environment production --detach`
+- Redeploy frontend: `cd apps/web && npx vercel --prod` (or just push to `main`)
+- Env vars live in each platform's dashboard (Railway: Variables tab; Vercel: Project →
+  Settings → Environment Variables), not in this repo.
+
 ## What's still missing for a real end-to-end prototype
 
 Everything below is a genuine gap, not a nitpick:
 
-1. Instagram/X/Reddit ingestion, and research-signal/audience-signal/performance ingestion
-   generally, are still 100% manual entry — only YouTube has a connector (see above). A
-   prototype a real creator uses daily will still hit this wall for every platform but one.
-2. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
-   exists.
-3. Research Agent (CLAUDE.md §11.3) doesn't exist as a live cross-platform fetcher — Trend
-   Intelligence now reasons over signals once they're in the system (momentum/saturation/
-   durability/relevance), but nothing goes and finds those signals itself; that's still
-   gated on #1 above.
-4. No CI-enforced deployment (`.github/workflows` runs tests + build on every push, but
-   there's no Vercel/Railway deploy config yet).
-5. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
+1. **Security hardening — explicitly deferred, not forgotten.** An audit this pass found:
+   no rate limiting anywhere (including on LLM-backed endpoints — a cost-control gap too),
+   no security-headers middleware, CORS `allow_methods`/`allow_headers` wildcarded, and one
+   **confirmed, live, high-severity gap: Row Level Security is disabled on all 45 Supabase
+   tables**, so the public anon key (shipped in the frontend bundle) can read raw data
+   directly via Supabase's REST API, bypassing the FastAPI backend's tenant-isolation
+   entirely — verified by pulling real `users`/`creators` rows with just the anon key and no
+   auth. The backend's own auth/ownership enforcement (`get_owned_creator` on every
+   creator-scoped route) is solid; this gap is at the Supabase/database layer, underneath it.
+2. Real email verification is built (login page handles the "check your email"/resend flow)
+   but **not yet turned on** — needs Supabase's SMTP configured with a Resend API key
+   (dashboard-only step, no API for it with the keys this project has) and "Confirm email"
+   re-enabled under Authentication → Sign In / Providers → Email. Until then, signup logs
+   the creator in immediately, matching the dev-friendly behavior used throughout this
+   session.
+3. Instagram/X/Reddit ingestion, and audience-signal/performance ingestion generally, are
+   still 100% manual entry — only YouTube has a connector.
+4. Object storage (R2/S3) is not wired — no video/image/media upload or storage path exists.
+5. Premium visual pass (animation, 3D, dark mode, mobile nav) not started — current UI is
+   functional but plain (confirmed: zero animation/3D libraries installed, no mobile drawer,
+   `<p>Loading…</p>` in place of skeleton loaders).
+6. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
 
 Shipped since the last pass over this list (all with passing unit/integration tests and a
 live smoke test against a real Supabase project, not just mocked): Home dashboard rewire,
 Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, real Supabase Auth,
-YouTube link ingestion, and semantic memory (local embeddings + search).
+YouTube link ingestion, semantic memory (local embeddings + search), the full auto-pipeline
+("paste a link, every engine starts" — including the formerly-missing live Research Agent
+half), a real (non-stub) model provider, and a live Vercel + Railway deployment.

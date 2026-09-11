@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 _UA = "Mozilla/5.0 (compatible; CreatorIntelligenceOS/1.0; +https://github.com/abhishekvishwanath/creatoros)"
 _TIMEOUT = 10.0
+# EU-region outbound IPs (e.g. Railway's default region) get redirected
+# through consent.youtube.com's cookie-consent interstitial before the real
+# page loads, which has no channelId to find. This cookie pre-declares
+# consent (the same thing accepting the banner would set) and skips the
+# redirect entirely — it's opting out of a GDPR cookie-consent wall on
+# public content, not bypassing any login/auth. Harmless to send from
+# non-EU IPs too, where YouTube already skips the wall.
+_HEADERS = {"User-Agent": _UA, "Cookie": "CONSENT=YES+1"}
 _CHANNEL_ID_RE = re.compile(r'"channelId":"(UC[\w-]{10,})"')
 _ATOM_NS = "{http://www.w3.org/2005/Atom}"
 _YT_NS = "{http://www.youtube.com/xml/schemas/2015}"
@@ -68,7 +76,7 @@ async def resolve_channel(url: str) -> tuple[str, str]:
         channel_id = None
 
     try:
-        async with httpx.AsyncClient(headers={"User-Agent": _UA}, timeout=_TIMEOUT, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
             response = await client.get(page_url)
     except httpx.HTTPError as exc:
         raise YoutubeResolutionError(f"Couldn't reach YouTube: {exc}") from exc
@@ -102,7 +110,7 @@ async def fetch_recent_videos(channel_id: str, *, limit: int = 15) -> list[dict]
     {video_id, title, description, published_at, thumbnail_url, url}."""
     feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     try:
-        async with httpx.AsyncClient(headers={"User-Agent": _UA}, timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT) as client:
             response = await client.get(feed_url)
             response.raise_for_status()
     except httpx.HTTPError:

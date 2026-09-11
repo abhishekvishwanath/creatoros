@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 _UA = "Mozilla/5.0 (compatible; CreatorIntelligenceOS/1.0; +https://github.com/abhishekvishwanath/creatoros)"
 _TIMEOUT = 10.0
+# See youtube.py's _HEADERS for why this cookie is here: EU-region outbound
+# IPs otherwise get redirected through a cookie-consent interstitial page.
+_HEADERS = {"User-Agent": _UA, "Cookie": "CONSENT=YES+1"}
 _YT_INITIAL_DATA_RE = re.compile(r"var ytInitialData = ({.*?});</script>", re.DOTALL)
 
 
@@ -31,7 +34,7 @@ async def search_videos(query: str, *, limit: int = 5) -> list[dict]:
         return []
     url = f"https://www.youtube.com/results?search_query={quote(query.strip())}"
     try:
-        async with httpx.AsyncClient(headers={"User-Agent": _UA}, timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT) as client:
             response = await client.get(url)
             response.raise_for_status()
     except httpx.HTTPError:
