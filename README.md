@@ -1,15 +1,20 @@
 # Creator Intelligence OS
 
-An AI Content Intelligence & Growth Operating System for growing creators.
+An AI Content + Commercial Intelligence Operating System for growing creators.
 
 The system continuously learns who a creator is, how they communicate, who they serve,
 what they've made, what's worked, what the market is doing, and what they should make
-next — then helps them execute it and learns from what happens after publication.
+next — then helps them execute it and learns from what happens after publication. A
+parallel Commercial Intelligence loop uses the same creator brain to find brand
+sponsorship fits and run creator-approved outbound.
 
-Core loop: **UNDERSTAND → RESEARCH → DECIDE → CREATE → PUBLISH → MEASURE → LEARN → REPEAT**
+Content loop: **UNDERSTAND → RESEARCH → DECIDE → CREATE → PUBLISH → MEASURE → LEARN → REPEAT**
 
-See [CLAUDE.md](./CLAUDE.md) for the full product/architecture spec. This README covers
-how to run the codebase.
+Commercial loop: **PROFILE → DISCOVER BRANDS → QUALIFY → SCORE → BRIEF → OUTREACH → RESPOND → DECIDE → LEARN**
+
+See [CLAUDE.md](./CLAUDE.md) for the full product/architecture spec (Part I = content loop,
+Part II = commercial loop). This README covers how to run the codebase and what's actually
+implemented.
 
 ## Monorepo layout
 
@@ -28,10 +33,9 @@ how to run the codebase.
     /unit /integration
 ```
 
-The agent service (orchestrator, agents, model router, context builder, memory, tools)
-lives under `backend/app/agent_service` once it's built (see Status below) — it is not a
-separate deployable, just another layer inside the same FastAPI backend, per CLAUDE.md §56
-("avoid unnecessary microservices").
+The agent service (orchestrator, agents, model router, context builder) lives under
+`backend/app/agent_service` — it is not a separate deployable, just another layer inside
+the same FastAPI backend, per CLAUDE.md §56 ("avoid unnecessary microservices").
 
 ## Prerequisites
 
@@ -101,21 +105,59 @@ separate deployable, just another layer inside the same FastAPI backend, per CLA
 
 ## Status
 
-Implemented so far, in the order laid out in CLAUDE.md §54:
+Both loops in CLAUDE.md (Part I content loop, Part II commercial loop) are implemented
+end-to-end on the backend, with most of it also wired into the frontend. This is further
+along than earlier drafts of this README suggested — treat CLAUDE.md §54's build order as
+historical sequencing, not a list of what's still outstanding.
 
-- **Data model + Creator entity + tenant isolation**: the full PostgreSQL schema (34
-  tables across creator DNA, content, research, strategy, performance, experiments, and
-  agent observability), with every creator-scoped route gated through
-  `app/api/deps.py::get_owned_creator` so one user can never read or mutate another's
-  data. Covered by an automated test suite (`backend/tests`).
-- **Dashboard shell + IA**: the Next.js frontend implements the information architecture
-  from CLAUDE.md §38 (Home, Research, Opportunities, Create, Calendar, Analytics, Creator
-  DNA) with an onboarding flow, real data binding to whatever backend state actually
-  exists, and honest empty states (never fabricated data) for subsystems not built yet.
+### Content Intelligence loop — built
 
-Not yet built: the agent service (orchestrator, model router, context builder, and the
-actual agents), content ingestion, research/opportunity/strategy engines, and performance
-ingestion. Home and Creator DNA will visibly fill in as each of those lands.
+- **Data model + tenant isolation**: full PostgreSQL schema (14 Alembic migrations on top
+  of the initial schema) across creator DNA, content, research, strategy, performance,
+  experiments/learnings, commercial, and agent observability. Every creator-scoped route
+  is gated through `app/api/deps.py::get_owned_creator`. Covered by `backend/tests`
+  (unit + integration, one file per service/agent/route group).
+- **Agent Service**: real Orchestrator (`agent_service/orchestrator`), Model Router
+  (`agent_service/model_router` — Anthropic/Groq/stub, tier-based, never a hard-coded
+  model name in agent code), Context Builder (`agent_service/context/builder.py` — bounded,
+  task-specific snapshots, never a full DB dump), and strict `AgentOutput` contracts
+  (`agent_service/schemas/contracts.py`) enforced at the route layer via `validate_or_502`.
+- **Agents implemented**: Creator Intelligence, Audience Intelligence, Opportunity Engine,
+  Strategy Engine, Content Architect, Script Agent, Editorial Critic, Performance
+  Intelligence — plus the commercial-loop agents below. Each is a real `agent.run()` with
+  its own prompt, evidence handling, and proposed-state-change shape, not a placeholder.
+- **Full pipelines wired through the API and UI**: onboarding → `/creators/{id}/analyze`
+  (Creator DNA: positioning, voice, audience, pillars) → research signal / audience signal
+  ingestion → Opportunity Engine (scored, evidence-linked, components shown) → Strategy
+  Engine (weekly portfolio) → Content pipeline (brief → script → editorial critique →
+  rewrite → schedule/publish, CLAUDE.md §24) → performance ingestion → diagnosis → Learning
+  Engine (evidence-gated clustering into `StrategicLearning`, never a single-post rule).
+- **Frontend**: Research, Opportunities, Create, Calendar (folds in Strategy), Analytics,
+  and Creator DNA pages all call real endpoints and render real state, with honest empty
+  states where a creator has no data yet — not fabricated placeholders.
+
+### Commercial Intelligence loop (Part II) — built
+
+- `CommercialProfile` (versioned Commercial DNA), `Brand`/`BrandContact`/`BrandSignal`
+  (creator-scoped, manual entry per CLAUDE.md §69), Brand Intelligence Agent (opportunity
+  scoring with `contactability` computed in code, never model-guessed, per §71), Campaign
+  Intelligence Agent (brief generation), Outreach Agent (initial pitch draft, follow-up
+  draft, reply classification/extraction — never a decision, per §66).
+- Full loop wired end to end: brand entry → signals → `/opportunities/score` → brand radar
+  → campaign brief → outreach thread + drafted pitch → creator approves → creator marks
+  sent → creator pastes brand reply → extraction → **creator decision** (the only route
+  allowed to write `outcome`/`creator_decision`, enforced in `outreach.py` and the service
+  layer) → commercial outcomes feed the *same* `StrategicLearning` table as content
+  learnings (`commercial/...` category prefix), so both loops compound into one brain.
+- Frontend: `Brands` and `Outreach` pages, Analytics page filters learnings by
+  content vs. commercial.
+
+### Known gaps / stale spots
+
+- **Home dashboard** (`apps/web/app/page.tsx`) still renders hard-coded "not connected
+  yet" empty states for opportunities/strategy/performance even though those endpoints now
+  return real data — it hasn't been rewired since those subsystems landed. Every other
+  page was updated; this one was missed.
 
 **Auth**: Supabase Auth is the intended final auth provider, but isn't wired into the
 frontend yet. Until then, `POST /creators` finds-or-creates a `User` by email and the
@@ -123,3 +165,36 @@ frontend stores the returned `user_id` in `localStorage`, sending it as `X-Debug
 on every request (see `backend/app/api/deps.py` and `apps/web/lib/session.ts` — both
 clearly marked `TODO(auth)`). Tenant isolation itself is real and tested; only the
 identity-proving mechanism is a placeholder.
+
+## What's still missing for a real end-to-end prototype
+
+Everything below is a genuine gap, not a nitpick — see the assistant's summary in-session
+for the fuller reasoning on each:
+
+1. Real auth (Supabase Auth wired into the frontend, JWT verification replacing
+   `X-Debug-User-Id`).
+2. Home dashboard rewired to real opportunity/strategy/performance data (see above).
+3. Any platform/API ingestion — content, research signals, audience signals, and
+   performance are 100% manual entry today; no YouTube/Instagram/X/Reddit connector exists
+   (this is a documented, deliberate MVP choice per CLAUDE.md §69, not an oversight, but a
+   prototype a real creator uses daily will hit this wall fast).
+4. Semantic memory: the `content_embeddings` pgvector table exists in the schema but
+   nothing writes or queries it — no embedding generation, no similarity search. Context
+   retrieval today is entirely "most recent N rows," not semantic.
+5. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
+   exists.
+6. Research Agent and Trend Intelligence Agent (CLAUDE.md §11.3–11.4) don't exist as
+   agents — research signal ingestion has no normalization, cross-platform aggregation, or
+   momentum/saturation analysis behind it, just storage of what's typed in.
+7. Repurposing Agent/engine (§11.9, §25) is not built — no source-asset-to-derivatives
+   pipeline.
+8. Experimentation: `Experiment`/`ExperimentResult` tables exist in the schema but have no
+   service, route, or agent — there's no way to create or track a hypothesis-driven test
+   today. The Learning Engine only does passive, after-the-fact clustering of performance
+   diagnoses.
+9. No CI (no `.github/workflows`), no deployment config for Vercel/Railway.
+10. `.env.example` model names (`claude-opus-4-1`, `claude-sonnet-4-5`, `claude-haiku-4-5`)
+    are out of date relative to the current Claude model family — low-risk since model
+    identity is config-only, but worth updating before relying on the Anthropic path.
+11. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
+    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
