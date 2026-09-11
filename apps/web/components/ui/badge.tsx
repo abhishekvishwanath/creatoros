@@ -4,11 +4,11 @@ import clsx from "clsx";
 type Tone = "neutral" | "accent" | "good" | "warn" | "bad";
 
 const toneClasses: Record<Tone, string> = {
-  neutral: "bg-zinc-100 text-zinc-600",
+  neutral: "bg-ink/8 text-subtle",
   accent: "bg-accent-soft text-accent",
-  good: "bg-green-50 text-good",
-  warn: "bg-amber-50 text-warn",
-  bad: "bg-red-50 text-bad",
+  good: "bg-good-soft text-good",
+  warn: "bg-warn-soft text-warn",
+  bad: "bg-bad-soft text-bad",
 };
 
 export function Badge({

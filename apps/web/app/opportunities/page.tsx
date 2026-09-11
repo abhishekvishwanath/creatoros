@@ -9,6 +9,7 @@ import { OpportunityCard } from "@/components/opportunity-card";
 import { getSession } from "@/lib/session";
 import { generateOpportunities, listOpportunities, updateOpportunityStatus, ApiError } from "@/lib/api";
 import type { OpportunityRead, OpportunityStatus } from "@/lib/types";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 export default function OpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<OpportunityRead[]>([]);
@@ -79,7 +80,7 @@ export default function OpportunitiesPage() {
       />
       <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-2">
         {loading ? (
-          <p className="text-sm text-subtle">Loading…</p>
+          <SkeletonText lines={2} />
         ) : opportunities.length === 0 ? (
           <div className="lg:col-span-2">
             <EmptyState

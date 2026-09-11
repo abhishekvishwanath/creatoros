@@ -66,7 +66,7 @@ export function PipelineProgress({
         <h1 className="text-lg font-semibold text-ink">Starting your engines</h1>
         <p className="mt-2 text-sm text-subtle">Real research, real analysis — this takes a minute or two.</p>
       </div>
-      <div className="space-y-1 rounded-xl border border-border bg-white p-6 shadow-card">
+      <div className="space-y-1 rounded-xl border border-border bg-canvas-raised p-6 shadow-card">
         {stages.length === 0 ? (
           <div className="flex items-center gap-3 py-2 text-sm text-subtle">
             <Loader2 className="h-4 w-4 animate-spin text-accent" /> Connecting…

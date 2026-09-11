@@ -14,6 +14,7 @@ import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
 import { listOpportunities, listStrategies, getPerformanceOverview, listBrandRadar, startPipelineRun, ApiError } from "@/lib/api";
 import type { OpportunityRead, StrategyRead, PerformanceOverviewItem, BrandRadarItem, PipelineRunRead } from "@/lib/types";
+import { SkeletonText, SkeletonCard } from "@/components/ui/skeleton";
 
 function ratioTone(ratio: number): "good" | "warn" | "bad" {
   if (ratio >= 1.3) return "good";
@@ -93,7 +94,11 @@ export default function HomePage() {
   }
 
   if (loading) {
-    return <div className="p-8 text-sm text-subtle">Loading…</div>;
+    return <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>;
   }
 
   if (!state) {
@@ -141,7 +146,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             {widgetsLoading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : topOpportunities.length === 0 ? (
               <EmptyState
                 icon={Sparkles}
@@ -210,7 +215,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             {widgetsLoading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : recentWithSnapshot.length === 0 ? (
               <EmptyState
                 icon={TrendingUp}
@@ -249,7 +254,7 @@ export default function HomePage() {
           </CardHeader>
           <CardContent>
             {widgetsLoading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : !strategy ? (
               <EmptyState
                 icon={Sparkles}
@@ -294,7 +299,7 @@ export default function HomePage() {
             </CardHeader>
             <CardContent>
               {widgetsLoading ? (
-                <p className="text-sm text-subtle">Loading…</p>
+                <SkeletonText lines={2} />
               ) : topBrandOpportunity ? (
                 <div>
                   <p className="text-sm font-medium text-ink">{topBrandOpportunity.brand.name}</p>

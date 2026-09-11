@@ -2,12 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens (CLAUDE.md §35: Linear + Notion + premium editorial analytics).
+   RGB triplets (not hex) so Tailwind's `rgb(var(--x) / <alpha-value>)` pattern
+   can apply opacity modifiers (e.g. bg-canvas/50) the same way built-in
+   Tailwind colors do. Every existing bg-canvas/text-ink/etc. utility across
+   the app keeps working unchanged — only the token *definitions* move here,
+   so dark mode is a global flip, not a per-component rewrite. */
+:root {
+  --canvas: 250 250 249;
+  --canvas-raised: 255 255 255;
+  --ink: 24 24 27;
+  --subtle: 113 113 122;
+  --line: 228 228 231;
+  --border: 228 228 231;
+  --accent: 79 70 229;
+  --accent-soft: 238 242 255;
+  --accent-ink: 255 255 255;
+  --good: 22 163 74;
+  --good-soft: 240 253 244;
+  --warn: 180 83 9;
+  --warn-soft: 255 251 235;
+  --bad: 220 38 38;
+  --bad-soft: 254 242 242;
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06);
+  --shadow-elevated: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.06);
+  --shadow-glow: 0 0 0 1px rgb(var(--accent) / 0.15), 0 8px 24px -4px rgb(var(--accent) / 0.25);
+}
+
+.dark {
+  --canvas: 9 9 11;
+  --canvas-raised: 24 24 27;
+  --ink: 250 250 249;
+  --subtle: 161 161 170;
+  --line: 39 39 42;
+  --border: 39 39 42;
+  --accent: 129 140 248;
+  --accent-soft: 30 27 75;
+  --accent-ink: 24 24 27;
+  --good: 74 222 128;
+  --good-soft: 20 40 28;
+  --warn: 251 191 36;
+  --warn-soft: 44 33 12;
+  --bad: 248 113 113;
+  --bad-soft: 46 22 22;
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.4);
+  --shadow-elevated: 0 4px 16px -2px rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.4);
+  --shadow-glow: 0 0 0 1px rgb(var(--accent) / 0.25), 0 8px 28px -4px rgb(var(--accent) / 0.4);
+}
+
+html {
+  color-scheme: light;
+}
+html.dark {
+  color-scheme: dark;
+}
+
 html,
 body {
-  background-color: #fafaf9;
-  color: #18181b;
+  background-color: rgb(var(--canvas));
+  color: rgb(var(--ink));
 }
 
 * {
-  border-color: #e4e4e7;
+  border-color: rgb(var(--border));
+}
+
+::selection {
+  background-color: rgb(var(--accent) / 0.25);
 }

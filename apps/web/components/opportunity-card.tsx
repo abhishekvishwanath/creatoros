@@ -67,7 +67,7 @@ export function OpportunityCard({
             {Object.entries(opportunity.score_components).map(([key, value]) => (
               <div key={key}>
                 <p className="text-xs text-subtle">{COMPONENT_LABELS[key] ?? key}</p>
-                <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-ink/8">
                   <div className="h-full rounded-full bg-accent" style={{ width: `${Math.round(value * 100)}%` }} />
                 </div>
               </div>

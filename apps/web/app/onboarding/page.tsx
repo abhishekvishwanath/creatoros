@@ -94,7 +94,7 @@ export default function OnboardingPage() {
               e.preventDefault();
               startEngines(youtubeUrl);
             }}
-            className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card"
+            className="space-y-4 rounded-xl border border-border bg-canvas-raised p-6 shadow-card"
           >
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">YouTube channel URL</label>
@@ -134,7 +134,7 @@ export default function OnboardingPage() {
             Tell us who you are. We&apos;ll start building your Creator DNA.
           </p>
         </div>
-        <form onSubmit={handleCreateProfile} className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card">
+        <form onSubmit={handleCreateProfile} className="space-y-4 rounded-xl border border-border bg-canvas-raised p-6 shadow-card">
           {!supabase && (
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">Email</label>

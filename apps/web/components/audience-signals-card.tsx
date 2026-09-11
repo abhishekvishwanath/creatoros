@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
 import { createAudienceSignal, listAudienceSignals, ApiError } from "@/lib/api";
 import type { AudienceSignalRead } from "@/lib/types";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 export function AudienceSignalsCard() {
   const [signals, setSignals] = useState<AudienceSignalRead[]>([]);
@@ -103,7 +104,7 @@ export function AudienceSignalsCard() {
         </form>
 
         {loading ? (
-          <p className="text-sm text-subtle">Loading…</p>
+          <SkeletonText lines={2} />
         ) : loadError ? (
           <p className="text-sm text-bad">{loadError}</p>
         ) : signals.length === 0 ? (

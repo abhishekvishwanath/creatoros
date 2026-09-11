@@ -19,6 +19,7 @@ import {
   ApiError,
 } from "@/lib/api";
 import type { ExperimentDetailRead, ExperimentRead, ExperimentStatus } from "@/lib/types";
+import { SkeletonText, SkeletonCard } from "@/components/ui/skeleton";
 
 function statusTone(status: string): "good" | "warn" | "bad" | "neutral" | "accent" {
   if (status === "completed") return "good";
@@ -33,7 +34,11 @@ export default function ExperimentsPage() {
       fallback={
         <div>
           <PageHeader title="Experiments" description="Formulate a hypothesis, test it, and see if it holds up." />
-          <div className="p-8 text-sm text-subtle">Loading…</div>
+          <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
         </div>
       }
     >
@@ -211,7 +216,7 @@ function ExperimentsPageInner() {
           {!error && warnings.length > 0 && <p className="text-sm text-warn">{warnings.join(" ")}</p>}
 
           {loadingDetail || !experiment ? (
-            <p className="text-sm text-subtle">Loading…</p>
+            <SkeletonText lines={2} />
           ) : (
             <>
               <Card>
@@ -372,7 +377,7 @@ function ExperimentsPageInner() {
           </CardHeader>
           <CardContent>
             {loadingList ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : experiments.length === 0 ? (
               <EmptyState icon={FlaskConical} title="No experiments yet" description="Start one from a hypothesis on the right." />
             ) : (

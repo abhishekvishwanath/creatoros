@@ -3,34 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
-import {
-  Home,
-  Compass,
-  Lightbulb,
-  PenSquare,
-  CalendarDays,
-  BarChart3,
-  Dna,
-  Building2,
-  Send,
-  FlaskConical,
-  LogOut,
-} from "lucide-react";
+import { motion } from "framer-motion";
+import { LogOut } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { clearSession } from "@/lib/session";
-
-const NAV_ITEMS = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/research", label: "Research", icon: Compass },
-  { href: "/opportunities", label: "Opportunities", icon: Lightbulb },
-  { href: "/create", label: "Create", icon: PenSquare },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/experiments", label: "Experiments", icon: FlaskConical },
-  { href: "/brands", label: "Brands", icon: Building2 },
-  { href: "/outreach", label: "Outreach", icon: Send },
-  { href: "/creator-dna", label: "Creator DNA", icon: Dna },
-];
+import { NAV_ITEMS } from "@/lib/nav-items";
+import { ThemeToggle } from "./theme-toggle";
 
 export function NavSidebar() {
   const pathname = usePathname();
@@ -43,11 +21,9 @@ export function NavSidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-56 flex-col border-r border-border bg-white px-3 py-4">
-      <div className="mb-6 px-2">
-        <span className="text-sm font-semibold tracking-tight text-ink">
-          Creator Intelligence OS
-        </span>
+    <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-border bg-canvas-raised px-3 py-4 lg:flex">
+      <div className="mb-6 flex items-center justify-between px-2">
+        <span className="text-sm font-semibold tracking-tight text-ink">Creator Intelligence OS</span>
       </div>
       <nav className="flex flex-1 flex-col gap-0.5">
         {NAV_ITEMS.map((item) => {
@@ -58,27 +34,35 @@ export function NavSidebar() {
               key={item.href}
               href={item.href}
               className={clsx(
-                "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "bg-accent-soft text-accent"
-                  : "text-subtle hover:bg-zinc-100 hover:text-ink"
+                "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+                active ? "text-accent" : "text-subtle hover:bg-ink/5 hover:text-ink"
               )}
             >
-              <Icon className="h-4 w-4" strokeWidth={1.75} />
-              {item.label}
+              {active && (
+                <motion.span
+                  layoutId="nav-active-pill"
+                  className="absolute inset-0 rounded-lg bg-accent-soft"
+                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                />
+              )}
+              <Icon className="relative z-10 h-4 w-4" strokeWidth={1.75} />
+              <span className="relative z-10">{item.label}</span>
             </Link>
           );
         })}
       </nav>
-      {supabase && (
-        <button
-          onClick={handleSignOut}
-          className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-subtle transition-colors hover:bg-zinc-100 hover:text-ink"
-        >
-          <LogOut className="h-4 w-4" strokeWidth={1.75} />
-          Sign out
-        </button>
-      )}
+      <div className="flex items-center justify-between px-1">
+        {supabase && (
+          <button
+            onClick={handleSignOut}
+            className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-subtle transition-colors hover:bg-ink/5 hover:text-ink"
+          >
+            <LogOut className="h-4 w-4" strokeWidth={1.75} />
+            Sign out
+          </button>
+        )}
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }

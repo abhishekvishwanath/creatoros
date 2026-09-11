@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
 import { getLearnings, getPerformanceOverview, retractLearning, syncLearnings, ApiError } from "@/lib/api";
 import type { LearningRead, PerformanceOverviewItem } from "@/lib/types";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 function ratioTone(ratio: number): "good" | "warn" | "bad" {
   if (ratio >= 1.3) return "good";
@@ -125,7 +126,7 @@ export default function AnalyticsPage() {
       <PageHeader title="Analytics" description="What changed, why it may have changed, and what to test next." />
       <div className="p-8 space-y-8">
         {loading ? (
-          <p className="text-sm text-subtle">Loading…</p>
+          <SkeletonText lines={2} />
         ) : error ? (
           <p className="text-sm text-bad">{error}</p>
         ) : (

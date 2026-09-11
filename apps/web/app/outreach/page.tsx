@@ -20,6 +20,7 @@ import {
   ApiError,
 } from "@/lib/api";
 import type { CreatorDecision, OutreachMessageRead, OutreachPipelineItem, OutreachThreadDetail } from "@/lib/types";
+import { SkeletonText, SkeletonCard } from "@/components/ui/skeleton";
 
 const inputClass = "w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent";
 
@@ -50,7 +51,11 @@ export default function OutreachPage() {
       fallback={
         <div>
           <PageHeader title="Outreach" description="Draft-only — you review, approve, and send every message yourself." />
-          <div className="p-8 text-sm text-subtle">Loading…</div>
+          <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
         </div>
       }
     >
@@ -72,7 +77,7 @@ function MessageCard({
 }) {
   const isInbound = message.direction === "inbound";
   return (
-    <div className={`rounded-lg border border-border p-3 ${isInbound ? "bg-zinc-50" : "bg-white"}`}>
+    <div className={`rounded-lg border border-border p-3 ${isInbound ? "bg-ink/5" : "bg-canvas-raised"}`}>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-subtle">
           {isInbound ? "Brand reply" : message.kind.replace("_", " ")}
@@ -82,7 +87,7 @@ function MessageCard({
       {message.subject && <p className="text-sm font-medium text-ink">{message.subject}</p>}
       <p className="whitespace-pre-wrap text-sm text-ink">{message.body}</p>
       {isInbound && message.extracted_data && (
-        <div className="mt-2 space-y-1.5 rounded-lg border border-border bg-white p-2.5">
+        <div className="mt-2 space-y-1.5 rounded-lg border border-border bg-canvas-raised p-2.5">
           <div className="flex items-center gap-2">
             <Badge tone={sentimentTone(message.extracted_data.sentiment)}>{message.extracted_data.sentiment}</Badge>
           </div>
@@ -190,7 +195,7 @@ function DecisionCard({
 
   if (thread.creator_decision) {
     return (
-      <div className="rounded-lg border border-border bg-zinc-50 p-3 text-sm">
+      <div className="rounded-lg border border-border bg-ink/5 p-3 text-sm">
         <p className="text-ink">
           Decision recorded: <span className="font-medium">{thread.creator_decision.replace(/_/g, " ")}</span>
         </p>
@@ -426,7 +431,7 @@ function OutreachPageInner() {
           </CardHeader>
           <CardContent className="p-0">
             {loadingList ? (
-              <p className="p-4 text-sm text-subtle">Loading…</p>
+              <div className="p-4"><SkeletonText lines={2} /></div>
             ) : threads.length === 0 ? (
               <div className="p-4">
                 <EmptyState
@@ -441,7 +446,7 @@ function OutreachPageInner() {
                   <li key={thread.id}>
                     <button
                       onClick={() => selectThread(thread.id)}
-                      className={`flex w-full items-center justify-between px-4 py-3 text-left hover:bg-zinc-50 ${
+                      className={`flex w-full items-center justify-between px-4 py-3 text-left hover:bg-ink/5 ${
                         selectedId === thread.id ? "bg-accent-soft" : ""
                       }`}
                     >

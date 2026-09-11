@@ -38,6 +38,7 @@ import type {
   PerformanceSnapshotRead,
   RepurposeContentResponse,
 } from "@/lib/types";
+import { SkeletonText, SkeletonCard } from "@/components/ui/skeleton";
 
 const REPURPOSE_TARGETS: { platform: string; format: string; label: string }[] = [
   { platform: "instagram", format: "reel", label: "Instagram Reel" },
@@ -94,7 +95,11 @@ export default function CreatePage() {
       fallback={
         <div>
           <PageHeader title="Create" description="Angle → hook → brief → script → critique → improved script." />
-          <div className="p-8 text-sm text-subtle">Loading…</div>
+          <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
         </div>
       }
     >
@@ -475,7 +480,7 @@ function CreatePageInner() {
             </CardHeader>
             <CardContent>
               {loadingDetail ? (
-                <p className="text-sm text-subtle">Loading…</p>
+                <SkeletonText lines={2} />
               ) : brief ? (
                 <div className="space-y-2 text-sm">
                   <p><span className="font-medium text-ink">Angle:</span> <span className="text-ink">{brief.angle}</span></p>
@@ -513,7 +518,7 @@ function CreatePageInner() {
             </CardHeader>
             <CardContent>
               {loadingDetail ? (
-                <p className="text-sm text-subtle">Loading…</p>
+                <SkeletonText lines={2} />
               ) : latestScript ? (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
@@ -831,7 +836,7 @@ function CreatePageInner() {
           </CardHeader>
           <CardContent>
             {loadingList ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : contentItems.length === 0 ? (
               <EmptyState icon={PenSquare} title="Nothing in progress" description="Start from an opportunity on the right." />
             ) : (
@@ -858,7 +863,7 @@ function CreatePageInner() {
           <CardContent>
             {error && <p className="mb-2 text-xs text-bad">{error}</p>}
             {loadingList ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : opportunities.length === 0 ? (
               <EmptyState
                 icon={Lightbulb}

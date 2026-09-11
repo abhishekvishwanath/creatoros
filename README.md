@@ -252,16 +252,32 @@ Everything below is a genuine gap, not a nitpick:
 3. Instagram/X/Reddit ingestion, and audience-signal/performance ingestion generally, are
    still 100% manual entry — only YouTube has a connector.
 4. Object storage (R2/S3) is not wired — no video/image/media upload or storage path exists.
-5. Premium visual pass (animation, 3D, dark mode, mobile nav) — **in progress**. Dark mode
-   (CSS-variable tokens + a working toggle), mobile nav drawer, framer-motion page
-   transitions/micro-interactions, and skeleton loaders are done; the 3D hero/visualization
-   piece is not yet built.
-6. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
+5. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
+
+### Premium visual pass — built
+
+CSS-variable design tokens (`app/globals.css`) drive every existing `bg-canvas`/`text-ink`/
+etc. utility across the whole app, so dark mode (working toggle in the nav, persisted,
+flash-free via an inline pre-hydration script) required zero per-page rewrites — only the
+token *definitions* moved. Also: a mobile nav drawer (`components/mobile-nav.tsx`, closing
+the previously-confirmed zero-mobile-nav gap), framer-motion page transitions and
+micro-interactions (sliding active-nav indicator, button tap feedback, entrance animation),
+real Inter font loading via `next/font`, skeleton loaders (`components/ui/skeleton.tsx`)
+replacing every `<p>Loading…</p>`, and a public `/welcome` landing page with a
+react-three-fiber hero (`components/three/creator-brain-scene.tsx`) — a generated (not
+commissioned-art) node-graph visualization of the actual product loop (Research → Strategy →
+Content → Performance → Learning around a central creator node), reusable later against real
+pipeline-run status. Visually verified via a real Playwright run (not just "it compiles") at
+desktop and mobile widths, light and dark, including catching and fixing a genuine WebGL
+context-loss bug (drei's `Text`/troika font-shaping under software rendering — swapped to
+DOM-based labels via drei's `Html`) and a node-overlap bug (an angle-desynced Y-offset that
+clustered labels at certain rotations — fixed with a per-node fixed vertical stagger).
 
 Shipped since the last pass over this list (all with passing unit/integration tests and a
 live smoke test against a real Supabase project, not just mocked): Home dashboard rewire,
 Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, real Supabase Auth,
 YouTube link ingestion, semantic memory (local embeddings + search), the full auto-pipeline
 ("paste a link, every engine starts" — including the formerly-missing live Research Agent
-half), a real (non-stub) model provider, and a live Vercel + Render deployment.
+half), a real (non-stub) model provider, a live Vercel + Render deployment, and the premium
+visual pass (dark mode, mobile nav, animation, 3D hero).

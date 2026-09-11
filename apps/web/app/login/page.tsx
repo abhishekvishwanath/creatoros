@@ -102,7 +102,7 @@ export default function LoginPage() {
             {mode === "sign-in" ? "Sign in to your account." : "Create an account to get started."}
           </p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-border bg-canvas-raised p-6 shadow-card">
           <div>
             <label className="mb-1 block text-sm font-medium text-ink">Email</label>
             <input

@@ -20,6 +20,7 @@ import {
   ApiError,
 } from "@/lib/api";
 import type { BottleneckRead, CalendarEventRead, StrategyItemRead, StrategyRead } from "@/lib/types";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -153,7 +154,7 @@ export default function CalendarPage() {
       />
       <div className="space-y-4 p-8">
         {loading ? (
-          <p className="text-sm text-subtle">Loading…</p>
+          <SkeletonText lines={2} />
         ) : (
           <>
             {bottlenecks.length > 0 && (

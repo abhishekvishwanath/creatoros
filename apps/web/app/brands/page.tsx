@@ -26,6 +26,7 @@ import {
   ApiError,
 } from "@/lib/api";
 import type { BrandContactRead, BrandRadarItem, BrandRead, BrandSignalRead, CampaignBriefRead } from "@/lib/types";
+import { SkeletonText, SkeletonCard } from "@/components/ui/skeleton";
 
 const inputClass = "rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent";
 
@@ -66,7 +67,11 @@ export default function BrandsPage() {
       fallback={
         <div>
           <PageHeader title="Brands" description="Brand Radar — which brands actually make sense for you, and why." />
-          <div className="p-8 text-sm text-subtle">Loading…</div>
+          <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
         </div>
       }
     >
@@ -551,7 +556,7 @@ function BrandsPageInner() {
           </CardHeader>
           <CardContent className="p-0">
             {loadingRadar ? (
-              <p className="p-4 text-sm text-subtle">Loading…</p>
+              <div className="p-4"><SkeletonText lines={2} /></div>
             ) : radar.length === 0 ? (
               <div className="p-4">
                 <EmptyState
@@ -566,7 +571,7 @@ function BrandsPageInner() {
                   <li key={brand.id}>
                     <button
                       onClick={() => selectBrand(brand.id)}
-                      className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-zinc-50"
+                      className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-ink/5"
                     >
                       <div>
                         <p className="text-sm font-medium text-ink">{brand.name}</p>
@@ -600,7 +605,7 @@ function BrandsPageInner() {
             </CardHeader>
             <CardContent className="p-0">
               {loadingList ? (
-                <p className="p-4 text-sm text-subtle">Loading…</p>
+                <div className="p-4"><SkeletonText lines={2} /></div>
               ) : brands.length === 0 ? (
                 <div className="p-4">
                   <EmptyState icon={Building2} title="No brands yet" description="Add one above to get started." />
@@ -611,7 +616,7 @@ function BrandsPageInner() {
                     <li key={b.id}>
                       <button
                         onClick={() => selectBrand(b.id)}
-                        className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-zinc-50 ${
+                        className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-ink/5 ${
                           selectedId === b.id ? "bg-accent-soft" : ""
                         }`}
                       >
@@ -639,7 +644,7 @@ function BrandsPageInner() {
             </Card>
           ) : loadingDetail || !selected ? (
             <Card>
-              <CardContent className="p-8 text-sm text-subtle">Loading…</CardContent>
+              <CardContent className="p-8"><SkeletonText lines={2} /></CardContent>
             </Card>
           ) : (
             <div className="space-y-4">
@@ -755,7 +760,7 @@ function BrandsPageInner() {
                   )}
                   {briefError && <p className="text-sm text-bad">{briefError}</p>}
                   {briefWarnings.length > 0 && <p className="text-sm text-warn">{briefWarnings.join(" ")}</p>}
-                  {loadingBrief && <p className="text-sm text-subtle">Loading…</p>}
+                  {loadingBrief && <SkeletonText lines={2} />}
                   {campaignBrief && (
                     <div className="space-y-2.5 text-sm">
                       {campaignBrief.campaign_concept && (

@@ -14,6 +14,7 @@ import { CommercialProfileCard } from "@/components/commercial-profile-card";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
 import { analyzeCreator, analyzeAudience, ApiError } from "@/lib/api";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 export default function CreatorDnaPage() {
   const { state, loading, refetch } = useCreatorState();
@@ -89,7 +90,7 @@ export default function CreatorDnaPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : state?.positioning ? (
               <div className="space-y-2">
                 <ConfidenceBadge confidence={state.positioning.confidence} />
@@ -114,7 +115,7 @@ export default function CreatorDnaPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : state?.voice ? (
               <div className="space-y-2">
                 <ConfidenceBadge confidence={state.voice.confidence} />
@@ -152,7 +153,7 @@ export default function CreatorDnaPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : state?.audience ? (
               <div className="space-y-2">
                 <ConfidenceBadge confidence={state.audience.confidence} />
@@ -259,7 +260,7 @@ export default function CreatorDnaPage() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-sm text-subtle">Loading…</p>
+              <SkeletonText lines={2} />
             ) : state?.positioning?.prohibited_topics?.length ? (
               <ul className="list-inside list-disc text-sm text-ink">
                 {state.positioning.prohibited_topics.map((t) => (

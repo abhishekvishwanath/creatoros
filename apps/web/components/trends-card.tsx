@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
 import { listTrendInsights, analyzeTrends, ApiError } from "@/lib/api";
 import type { TrendInsightRead } from "@/lib/types";
+import { SkeletonText } from "@/components/ui/skeleton";
 
 function momentumTone(momentum: string): "good" | "warn" | "bad" | "accent" {
   if (momentum === "rising" || momentum === "new") return "good";
@@ -90,7 +91,7 @@ export function TrendsCard() {
         {!error && warnings.length > 0 && <p className="mb-2 text-xs text-warn">{warnings.join(" ")}</p>}
 
         {loading ? (
-          <p className="text-sm text-subtle">Loading…</p>
+          <SkeletonText lines={2} />
         ) : insights.length === 0 ? (
           <EmptyState
             icon={TrendingUp}
