@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Sparkles, TrendingUp, Target, Handshake } from "lucide-react";
+import { AlertTriangle, ArrowRight, Sparkles, TrendingUp, Target, Handshake, Zap } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ConfidenceBadge } from "@/components/ui/confidence-badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PipelineProgress } from "@/components/pipeline-progress";
 import { useCreatorState } from "@/lib/use-creator-state";
 import { getSession } from "@/lib/session";
-import { listOpportunities, listStrategies, getPerformanceOverview, listBrandRadar } from "@/lib/api";
-import type { OpportunityRead, StrategyRead, PerformanceOverviewItem, BrandRadarItem } from "@/lib/types";
+import { listOpportunities, listStrategies, getPerformanceOverview, listBrandRadar, startPipelineRun, ApiError } from "@/lib/api";
+import type { OpportunityRead, StrategyRead, PerformanceOverviewItem, BrandRadarItem, PipelineRunRead } from "@/lib/types";
 
 function ratioTone(ratio: number): "good" | "warn" | "bad" {
   if (ratio >= 1.3) return "good";
@@ -20,12 +22,15 @@ function ratioTone(ratio: number): "good" | "warn" | "bad" {
 }
 
 export default function HomePage() {
-  const { state, loading } = useCreatorState();
+  const { state, loading, refetch } = useCreatorState();
   const [opportunities, setOpportunities] = useState<OpportunityRead[]>([]);
   const [strategy, setStrategy] = useState<StrategyRead | null>(null);
   const [performance, setPerformance] = useState<PerformanceOverviewItem[]>([]);
   const [brandRadar, setBrandRadar] = useState<BrandRadarItem[]>([]);
   const [widgetsLoading, setWidgetsLoading] = useState(true);
+  const [pipelineRunId, setPipelineRunId] = useState<string | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [startingPipeline, setStartingPipeline] = useState(false);
 
   const loadWidgets = useCallback(async () => {
     const session = getSession();
@@ -53,6 +58,39 @@ export default function HomePage() {
   useEffect(() => {
     loadWidgets();
   }, [loadWidgets]);
+
+  async function handleRunAllEngines() {
+    const session = getSession();
+    if (!session) return;
+    setPipelineError(null);
+    setStartingPipeline(true);
+    try {
+      const run = await startPipelineRun(session.creatorId);
+      setPipelineRunId(run.id);
+    } catch (err) {
+      setPipelineError(err instanceof ApiError ? err.message : "Couldn't start — is the API running?");
+    } finally {
+      setStartingPipeline(false);
+    }
+  }
+
+  function handlePipelineComplete(run: PipelineRunRead) {
+    void run;
+    setPipelineRunId(null);
+    refetch();
+    loadWidgets();
+  }
+
+  if (pipelineRunId) {
+    const session = getSession();
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center p-8">
+        {session && (
+          <PipelineProgress creatorId={session.creatorId} runId={pipelineRunId} onComplete={handlePipelineComplete} />
+        )}
+      </div>
+    );
+  }
 
   if (loading) {
     return <div className="p-8 text-sm text-subtle">Loading…</div>;
@@ -83,6 +121,15 @@ export default function HomePage() {
       <PageHeader
         title={`Welcome back, ${state.creator.name}`}
         description="What matters this week?"
+        action={
+          <div className="flex flex-col items-end gap-1.5">
+            <Button onClick={handleRunAllEngines} disabled={startingPipeline}>
+              <Zap className="h-4 w-4" />
+              {startingPipeline ? "Starting…" : "Run all engines"}
+            </Button>
+            {pipelineError && <p className="max-w-xs text-right text-xs text-bad">{pipelineError}</p>}
+          </div>
+        }
       />
       <div className="grid grid-cols-1 gap-4 p-8 lg:grid-cols-3">
         <Card className="lg:col-span-2">

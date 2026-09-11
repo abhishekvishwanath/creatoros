@@ -31,7 +31,7 @@ def test_anthropic_takes_priority_when_both_keys_set():
 
 def test_model_for_resolves_per_active_provider():
     router = ModelRouter(_settings(groq_api_key="gsk_test"))
-    assert router._model_for(ModelTier.STANDARD) == "qwen/qwen3.8-27b"
+    assert router._model_for(ModelTier.STANDARD) == "openai/gpt-oss-120b"
 
     router = ModelRouter(_settings(anthropic_api_key="sk-ant-test"))
     assert router._model_for(ModelTier.STANDARD) == "claude-sonnet-5"

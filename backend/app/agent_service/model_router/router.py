@@ -66,13 +66,14 @@ class ModelRouter:
         tier: ModelTier,
         system: str,
         user: str,
-        # Kept under 1000: Groq's free/on-demand tier enforces a hard
-        # output-tokens-per-request ceiling of 1000 for at least some models
-        # (observed directly: 1024 is rejected outright with "Request too
-        # large... OTPM: Limit 1000, Requested 1024", not a transient rate
-        # limit that clears with time). Anthropic has no such constraint at
-        # this size, so this default costs it nothing.
-        max_tokens: int = 900,
+        # The 1000-token ceiling observed on the older qwen3.8-27b tier
+        # ("Request too large... OTPM: Limit 1000, Requested 1024") does not
+        # apply to openai/gpt-oss-120b (verified live: 2000 accepted cleanly,
+        # ~0.2s latency, single-digit reasoning-token overhead at "low"
+        # effort). 2000 gives strategic/standard-tier agents enough headroom
+        # for a full structured JSON response (an array of opportunities, a
+        # weekly strategy) without every call site needing its own override.
+        max_tokens: int = 2000,
     ) -> ModelResponse:
         provider = self._settings.model_provider
         started = monotonic()

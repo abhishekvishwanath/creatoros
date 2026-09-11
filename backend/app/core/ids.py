@@ -48,6 +48,7 @@ PREFIXES = {
     "campaign_brief": "cbrief",
     "outreach_thread": "othread",
     "outreach_message": "omsg",
+    "pipeline_run": "pline",
     "agent_run": "run",
     "agent_message": "msg",
     "agent_tool_call": "tool",

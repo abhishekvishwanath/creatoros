@@ -15,6 +15,8 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -44,11 +46,27 @@ export default function LoginPage() {
     }
   }
 
+  async function handleResendConfirmation() {
+    if (!supabase || !email) return;
+    setError(null);
+    setResending(true);
+    try {
+      const { error: resendError } = await supabase.auth.resend({ type: "signup", email });
+      if (resendError) throw resendError;
+      setInfo("Confirmation email sent again — check your inbox.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't resend the email.");
+    } finally {
+      setResending(false);
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!supabase) return;
     setError(null);
     setInfo(null);
+    setAwaitingConfirmation(false);
     setSubmitting(true);
     try {
       if (mode === "sign-up") {
@@ -59,6 +77,7 @@ export default function LoginPage() {
           // creates the account but doesn't return a session until it's
           // confirmed.
           setInfo("Check your email to confirm your account, then sign in.");
+          setAwaitingConfirmation(true);
           setMode("sign-in");
           return;
         }
@@ -109,6 +128,16 @@ export default function LoginPage() {
           </div>
           {error && <p className="text-sm text-bad">{error}</p>}
           {info && <p className="text-sm text-good">{info}</p>}
+          {awaitingConfirmation && (
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resending}
+              className="w-full text-center text-xs text-accent underline underline-offset-2 hover:text-ink"
+            >
+              {resending ? "Resending…" : "Didn't get it? Resend confirmation email"}
+            </button>
+          )}
           <Button type="submit" disabled={submitting} className="w-full">
             {submitting ? "…" : mode === "sign-in" ? "Sign in" : "Sign up"}
           </Button>

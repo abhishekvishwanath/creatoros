@@ -41,18 +41,20 @@ class Settings(BaseSettings):
     model_standard_anthropic: str = "claude-sonnet-5"
     model_fast_anthropic: str = "claude-haiku-4-5-20251001"
 
-    # Groq model names per tier — free-tier open-source models. Verified
-    # live against Groq's current catalog (it changes over time; re-check
-    # with client.models.list() if these start 404ing):
-    # - qwen/qwen3.8-27b answers cleanly with no hidden reasoning preamble.
-    # - The openai/gpt-oss-* models are chain-of-thought reasoning models
-    #   whose thinking tokens eat the max_tokens budget before any content
-    #   comes out, so they need a much larger budget for the same task —
-    #   avoided here for cost/latency, not capability.
-    # - allam-2-7b is smaller/faster and still answers cleanly for FAST-tier use.
-    model_strategic_groq: str = "qwen/qwen3.8-27b"
-    model_standard_groq: str = "qwen/qwen3.8-27b"
-    model_fast_groq: str = "allam-2-7b"
+    # Groq model names per tier. Verified live against Groq's current catalog
+    # (it changes over time; re-check with client.models.list() if these
+    # start 404ing) — openai/gpt-oss-120b is the largest/strongest text model
+    # currently on the account (131k context, 65k max output), ahead of
+    # qwen/qwen3.8-27b, so it's used for both reasoning tiers per explicit
+    # product requirement (best available model, not cost-optimized). It's a
+    # chain-of-thought reasoning model — ModelRouter._is_reasoning_model
+    # already matches "gpt-oss" and sends reasoning_effort="low" so its
+    # thinking tokens don't eat the whole max_tokens budget before any
+    # content comes out. gpt-oss-20b (same family, smaller) covers FAST-tier
+    # bulk/classification work.
+    model_strategic_groq: str = "openai/gpt-oss-120b"
+    model_standard_groq: str = "openai/gpt-oss-120b"
+    model_fast_groq: str = "openai/gpt-oss-20b"
 
     web_origin: str = "http://localhost:3000"
 

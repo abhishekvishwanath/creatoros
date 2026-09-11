@@ -42,6 +42,7 @@ import type {
   LearningRead,
   MemorySearchResult,
   OpportunityRead,
+  PipelineRunRead,
   OpportunityStatus,
   OutreachMessageRead,
   OutreachPipelineItem,
@@ -489,6 +490,17 @@ export function searchMemory(creatorId: string, q: string, limit = 8) {
   return request<MemorySearchResult[]>(
     `/creators/${creatorId}/memory/search?q=${encodeURIComponent(q)}&limit=${limit}`
   );
+}
+
+export function startPipelineRun(creatorId: string, youtubeUrl?: string) {
+  return request<PipelineRunRead>(`/creators/${creatorId}/pipeline/run`, {
+    method: "POST",
+    body: JSON.stringify({ youtube_url: youtubeUrl ?? null }),
+  });
+}
+
+export function getPipelineRun(creatorId: string, runId: string) {
+  return request<PipelineRunRead>(`/creators/${creatorId}/pipeline/run/${runId}`);
 }
 
 export function listTrendInsights(creatorId: string) {

@@ -15,6 +15,7 @@ from app.api.routes import (
     opportunities,
     outreach,
     performance,
+    pipeline,
     research,
     strategy,
 )
@@ -42,3 +43,4 @@ api_router.include_router(outreach.router)
 api_router.include_router(ingestion.router)
 api_router.include_router(ingestion.accounts_router)
 api_router.include_router(memory.router)
+api_router.include_router(pipeline.router)

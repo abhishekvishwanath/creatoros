@@ -2,12 +2,14 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createCreator, importYoutubeChannel, analyzeCreator, ApiError } from "@/lib/api";
+import { createCreator, startPipelineRun, ApiError } from "@/lib/api";
 import { setSession, isAuthenticated, onAuthReady } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { PipelineProgress } from "@/components/pipeline-progress";
+import type { PipelineRunRead } from "@/lib/types";
 
-type Step = "profile" | "connect" | "building";
+type Step = "profile" | "connect" | "running";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -20,8 +22,7 @@ export default function OnboardingPage() {
 
   const [creatorId, setCreatorId] = useState<string | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
-  const [importSummary, setImportSummary] = useState<string | null>(null);
-  const [buildingLabel, setBuildingLabel] = useState("Building your Creator DNA…");
+  const [runId, setRunId] = useState<string | null>(null);
 
   useEffect(() => {
     // Real mode requires signing in first (identity comes from the session,
@@ -49,46 +50,30 @@ export default function OnboardingPage() {
     }
   }
 
-  async function finishToApp() {
-    if (!creatorId) return;
-    setStep("building");
-    setBuildingLabel("Building your Creator DNA…");
-    try {
-      await analyzeCreator(creatorId);
-    } catch {
-      // Non-fatal — the Creator DNA page has its own retry button. Don't
-      // block getting into the app over an analysis hiccup.
-    }
-    router.replace("/creator-dna");
-  }
-
-  async function handleImport(e: FormEvent) {
-    e.preventDefault();
+  async function startEngines(url?: string) {
     if (!creatorId) return;
     setError(null);
     setSubmitting(true);
     try {
-      const result = await importYoutubeChannel(creatorId, youtubeUrl);
-      const bits = [`Imported ${result.imported_count} video(s) from ${result.channel_name}.`];
-      if (result.transcript_count > 0) bits.push(`${result.transcript_count} had transcripts we can learn your voice from.`);
-      setImportSummary(bits.join(" "));
-      setBuildingLabel(`Analyzing ${result.channel_name}'s content…`);
-      await new Promise((r) => setTimeout(r, 900)); // let the creator read the summary
-      await finishToApp();
+      const run = await startPipelineRun(creatorId, url || undefined);
+      setRunId(run.id);
+      setStep("running");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't import that channel. Check the link and try again.");
+      setError(err instanceof ApiError ? err.message : "Couldn't start — is the API running?");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (step === "building") {
+  function handlePipelineComplete(run: PipelineRunRead) {
+    void run;
+    router.replace("/creator-dna");
+  }
+
+  if (step === "running" && creatorId && runId) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
-        <div className="w-full max-w-sm text-center">
-          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-          <p className="text-sm text-subtle">{buildingLabel}</p>
-        </div>
+        <PipelineProgress creatorId={creatorId} runId={runId} onComplete={handlePipelineComplete} />
       </div>
     );
   }
@@ -100,11 +85,17 @@ export default function OnboardingPage() {
           <div className="mb-8 text-center">
             <h1 className="text-lg font-semibold text-ink">Connect your channel</h1>
             <p className="mt-2 text-sm text-subtle">
-              Paste your YouTube channel link and we&apos;ll pull your recent videos — titles, descriptions, and
-              transcripts where available — to seed your Creator DNA instead of you typing it all in by hand.
+              Paste your YouTube channel link and every engine starts: we pull your recent videos, build your
+              Creator DNA, research your niche, and score real opportunities — automatically.
             </p>
           </div>
-          <form onSubmit={handleImport} className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              startEngines(youtubeUrl);
+            }}
+            className="space-y-4 rounded-xl border border-border bg-white p-6 shadow-card"
+          >
             <div>
               <label className="mb-1 block text-sm font-medium text-ink">YouTube channel URL</label>
               <input
@@ -116,14 +107,13 @@ export default function OnboardingPage() {
                 placeholder="https://youtube.com/@yourhandle"
               />
             </div>
-            {importSummary && <p className="text-sm text-good">{importSummary}</p>}
             {error && <p className="text-sm text-bad">{error}</p>}
             <Button type="submit" disabled={submitting} className="w-full">
-              {submitting ? "Importing…" : "Import & build my Creator DNA"}
+              {submitting ? "Starting…" : "Start the engines"}
             </Button>
             <button
               type="button"
-              onClick={finishToApp}
+              onClick={() => startEngines()}
               disabled={submitting}
               className="w-full text-center text-sm text-subtle underline underline-offset-2 hover:text-ink"
             >

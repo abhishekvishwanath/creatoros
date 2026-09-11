@@ -760,3 +760,23 @@ export interface MemorySearchResult {
   content_item_id: string | null;
   text: string;
 }
+
+export type PipelineStageName = "import" | "creator_dna" | "research" | "trends" | "opportunities" | "strategy";
+export type PipelineStageStatus = "pending" | "running" | "success" | "failed" | "skipped";
+
+export interface PipelineStageRead {
+  name: PipelineStageName;
+  status: PipelineStageStatus;
+  summary: string | null;
+  warnings: string[];
+}
+
+export interface PipelineRunRead {
+  id: string;
+  status: "running" | "completed" | "failed";
+  youtube_url: string | null;
+  stages: PipelineStageRead[];
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+}
