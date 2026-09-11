@@ -16,13 +16,11 @@ from urllib.parse import quote
 
 import httpx
 
+from app.domain.ingestion.youtube import _consent_headers
+
 logger = logging.getLogger(__name__)
 
-_UA = "Mozilla/5.0 (compatible; CreatorIntelligenceOS/1.0; +https://github.com/abhishekvishwanath/creatoros)"
 _TIMEOUT = 10.0
-# See youtube.py's _HEADERS for why this cookie is here: EU-region outbound
-# IPs otherwise get redirected through a cookie-consent interstitial page.
-_HEADERS = {"User-Agent": _UA, "Cookie": "CONSENT=YES+1"}
 _YT_INITIAL_DATA_RE = re.compile(r"var ytInitialData = ({.*?});</script>", re.DOTALL)
 
 
@@ -34,7 +32,11 @@ async def search_videos(query: str, *, limit: int = 5) -> list[dict]:
         return []
     url = f"https://www.youtube.com/results?search_query={quote(query.strip())}"
     try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT) as client:
+        # search results haven't been observed hitting the EU consent wall
+        # (unlike the channel page), but reusing youtube.py's consent
+        # cookie here is free insurance rather than a second guess to
+        # maintain (see youtube.py's _consent_headers for the story).
+        async with httpx.AsyncClient(headers=_consent_headers(), timeout=_TIMEOUT) as client:
             response = await client.get(url)
             response.raise_for_status()
     except httpx.HTTPError:

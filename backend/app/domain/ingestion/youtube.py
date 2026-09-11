@@ -20,7 +20,9 @@ empty/partial result (CLAUDE.md §43), never an exception the route has to
 turn into a 500.
 """
 
+import datetime
 import logging
+import random
 import re
 from xml.etree import ElementTree
 
@@ -30,14 +32,25 @@ logger = logging.getLogger(__name__)
 
 _UA = "Mozilla/5.0 (compatible; CreatorIntelligenceOS/1.0; +https://github.com/abhishekvishwanath/creatoros)"
 _TIMEOUT = 10.0
-# EU-region outbound IPs (e.g. Railway's default region) get redirected
-# through consent.youtube.com's cookie-consent interstitial before the real
-# page loads, which has no channelId to find. This cookie pre-declares
-# consent (the same thing accepting the banner would set) and skips the
-# redirect entirely — it's opting out of a GDPR cookie-consent wall on
-# public content, not bypassing any login/auth. Harmless to send from
-# non-EU IPs too, where YouTube already skips the wall.
-_HEADERS = {"User-Agent": _UA, "Cookie": "CONSENT=YES+1"}
+
+
+def _consent_headers() -> dict:
+    """EU-region outbound IPs (e.g. Railway's default region) get redirected
+    through consent.youtube.com's cookie-consent interstitial before the
+    real page loads, which has no channelId to find. Two flatter cookie
+    guesses (CONSENT=YES+1, then SOCS=CAISAiAD) were both verified live
+    NOT to stop the redirect — this is the specific
+    "YES+cb.<date>-17-p0.<lang>+FX+<n>" structure yt-dlp uses for exactly
+    this problem, which Google's frontend actually checks. This is opting
+    out of a GDPR consent wall on public content, not bypassing any
+    login/auth. Harmless to send from non-EU IPs too, where YouTube already
+    skips the wall.
+    """
+    today = datetime.date.today().strftime("%Y%m%d")
+    consent = f"YES+cb.{today}-17-p0.en+FX+{random.randint(100, 999)}"
+    return {"User-Agent": _UA, "Cookie": f"CONSENT={consent}"}
+
+
 _CHANNEL_ID_RE = re.compile(r'"channelId":"(UC[\w-]{10,})"')
 _ATOM_NS = "{http://www.w3.org/2005/Atom}"
 _YT_NS = "{http://www.youtube.com/xml/schemas/2015}"
@@ -72,11 +85,18 @@ async def resolve_channel(url: str) -> tuple[str, str]:
             url = f"https://{url}"
         if "youtube.com" not in url and "youtu.be" not in url:
             raise YoutubeResolutionError("That doesn't look like a YouTube URL.")
-        page_url = url
+        # Normalize to the www host before requesting, not after: a bare
+        # "youtube.com" URL 301-redirects to "www.youtube.com", and httpx
+        # (like browsers) strips the Cookie header across a host-changing
+        # redirect — silently dropping the consent cookie above and
+        # reintroducing the EU consent-wall redirect it exists to prevent.
+        # Requesting the www host directly means there's no such redirect
+        # for our own request to strip anything across.
+        page_url = re.sub(r"^(https?://)(?!www\.)(youtube\.com|m\.youtube\.com)", r"\1www.youtube.com", url)
         channel_id = None
 
     try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=_consent_headers(), timeout=_TIMEOUT, follow_redirects=True) as client:
             response = await client.get(page_url)
     except httpx.HTTPError as exc:
         raise YoutubeResolutionError(f"Couldn't reach YouTube: {exc}") from exc
@@ -84,6 +104,18 @@ async def resolve_channel(url: str) -> tuple[str, str]:
     if response.status_code == 404:
         raise YoutubeResolutionError("No YouTube channel found at that URL.")
     response.raise_for_status()
+
+    if response.url.host == "consent.youtube.com":
+        # Distinguishes "our consent cookie didn't work this time" from "bad
+        # URL" in logs/warnings — both currently surface as the same
+        # generic _parse_channel_page failure otherwise, which made the
+        # live EU-redirect bug (see _consent_headers) far harder to
+        # diagnose than it needed to be.
+        logger.warning("YouTube served the cookie-consent interstitial instead of the channel page for %s", page_url)
+        raise YoutubeResolutionError(
+            "YouTube served a cookie-consent page instead of the channel — this can happen "
+            "intermittently from some server regions. Please try again."
+        )
 
     return _parse_channel_page(response.text)
 
@@ -110,7 +142,7 @@ async def fetch_recent_videos(channel_id: str, *, limit: int = 15) -> list[dict]
     {video_id, title, description, published_at, thumbnail_url, url}."""
     feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     try:
-        async with httpx.AsyncClient(headers=_HEADERS, timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(headers=_consent_headers(), timeout=_TIMEOUT) as client:
             response = await client.get(feed_url)
             response.raise_for_status()
     except httpx.HTTPError:

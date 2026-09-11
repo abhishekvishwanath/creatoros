@@ -213,14 +213,22 @@ Live (Hobby/free tiers — expect cold starts and platform rate limits, not prod
 
 - **Frontend**: Vercel — `https://web-alpha-lovat-31.vercel.app`, auto-deploys on push to
   `main` (GitHub integration connected via `vercel link`).
-- **Backend**: Railway — `https://creatoros-production-fe16.up.railway.app`, deployed via
-  `railway up` from `/backend` (see `backend/railway.json` / `backend/Procfile` for the
-  start command — Railway's Railpack builder needs one of these to find `uvicorn`). Points
-  at the same Supabase Postgres as local dev; no separate production database.
-- Redeploy backend: `cd backend && npx -y @railway/cli up --service creatoros --environment production --detach`
+- **Backend**: Render — `https://creatoros-backend-achf.onrender.com`, Oregon (US) region,
+  deployed from the public GitHub repo via Render's API (`autoDeploy: yes`, so pushes to
+  `main` redeploy it automatically same as Vercel). Points at the same Supabase Postgres as
+  local dev; no separate production database.
+  **Not Railway**: an earlier deploy used Railway, whose default region is Amsterdam — that
+  put the backend's outbound IP in the EU, and YouTube redirects EU-region requests through
+  a cookie-consent interstitial that broke channel resolution in `app/domain/ingestion`
+  (confirmed live via Railway's own request logs, and confirmed fixed by moving to a US
+  region — this was a hosting-region issue, not a code bug; several cookie-based code fixes
+  were tried first and none of them were actually necessary). The Railway service has been
+  deleted.
+- Redeploy backend: push to `main` (auto-deploys), or trigger manually via the Render
+  dashboard / `POST https://api.render.com/v1/services/{id}/deploys`.
 - Redeploy frontend: `cd apps/web && npx vercel --prod` (or just push to `main`)
-- Env vars live in each platform's dashboard (Railway: Variables tab; Vercel: Project →
-  Settings → Environment Variables), not in this repo.
+- Env vars live in each platform's dashboard (Render: service → Environment; Vercel: Project
+  → Settings → Environment Variables), not in this repo.
 
 ## What's still missing for a real end-to-end prototype
 
@@ -244,9 +252,10 @@ Everything below is a genuine gap, not a nitpick:
 3. Instagram/X/Reddit ingestion, and audience-signal/performance ingestion generally, are
    still 100% manual entry — only YouTube has a connector.
 4. Object storage (R2/S3) is not wired — no video/image/media upload or storage path exists.
-5. Premium visual pass (animation, 3D, dark mode, mobile nav) not started — current UI is
-   functional but plain (confirmed: zero animation/3D libraries installed, no mobile drawer,
-   `<p>Loading…</p>` in place of skeleton loaders).
+5. Premium visual pass (animation, 3D, dark mode, mobile nav) — **in progress**. Dark mode
+   (CSS-variable tokens + a working toggle), mobile nav drawer, framer-motion page
+   transitions/micro-interactions, and skeleton loaders are done; the 3D hero/visualization
+   piece is not yet built.
 6. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
 
@@ -255,4 +264,4 @@ live smoke test against a real Supabase project, not just mocked): Home dashboar
 Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, real Supabase Auth,
 YouTube link ingestion, semantic memory (local embeddings + search), the full auto-pipeline
 ("paste a link, every engine starts" — including the formerly-missing live Research Agent
-half), a real (non-stub) model provider, and a live Vercel + Railway deployment.
+half), a real (non-stub) model provider, and a live Vercel + Render deployment.
