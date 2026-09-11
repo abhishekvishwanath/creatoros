@@ -40,6 +40,7 @@ import type {
   GenerateScriptResponse,
   GenerateStrategyResponse,
   LearningRead,
+  MemorySearchResult,
   OpportunityRead,
   OpportunityStatus,
   OutreachMessageRead,
@@ -60,9 +61,11 @@ import type {
   ScheduleContentRequest,
   ScheduleContentResponse,
   ScoreBrandOpportunityResponse,
+  SocialAccountRead,
   StrategyRead,
   StrategyStatus,
   TrendInsightRead,
+  YoutubeImportResponse,
 } from "./types";
 import { getAuthHeaders } from "./session";
 
@@ -469,6 +472,23 @@ export function evaluateExperiment(creatorId: string, experimentId: string) {
   return request<EvaluateExperimentResponse>(`/creators/${creatorId}/experiments/${experimentId}/evaluate`, {
     method: "POST",
   });
+}
+
+export function importYoutubeChannel(creatorId: string, url: string) {
+  return request<YoutubeImportResponse>(`/creators/${creatorId}/import/youtube`, {
+    method: "POST",
+    body: JSON.stringify({ url }),
+  });
+}
+
+export function listSocialAccounts(creatorId: string) {
+  return request<SocialAccountRead[]>(`/creators/${creatorId}/social-accounts`);
+}
+
+export function searchMemory(creatorId: string, q: string, limit = 8) {
+  return request<MemorySearchResult[]>(
+    `/creators/${creatorId}/memory/search?q=${encodeURIComponent(q)}&limit=${limit}`
+  );
 }
 
 export function listTrendInsights(creatorId: string) {

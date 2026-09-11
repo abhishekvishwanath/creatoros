@@ -63,6 +63,7 @@ class ScriptAgent(BaseAgent):
         platform: str | None = None,
         previous_body: str | None = None,
         critic_issues: list[dict] | None = None,
+        reference_scripts: list[dict] | None = None,
     ) -> AgentOutput:
         brief = brief or {}
         is_rewrite = bool(previous_body)
@@ -73,6 +74,22 @@ class ScriptAgent(BaseAgent):
                 f"Voice: tone={context.voice.tone}, sentence_style={context.voice.sentence_style}, "
                 f"personality={context.voice.personality}, signature_phrases={context.voice.signature_phrases}"
             )
+        # Semantic memory (CLAUDE.md §6.2, §10's own "3-5 relevant successful
+        # scripts" example) — the creator's own past scripts/transcripts most
+        # similar to this brief, for voice/pattern reference only. Never
+        # shown during a rewrite: at that point the model already has the
+        # actual previous draft plus critic issues, which is far more
+        # specific signal than a semantically-similar older piece.
+        if reference_scripts and not is_rewrite:
+            examples_text = "\n\n".join(
+                f"Example {i + 1}:\n{r['text'][:1200]}" for i, r in enumerate(reference_scripts)
+            )
+            user_parts.append(
+                "Reference — this creator's own past content, closest in topic/angle to this brief. "
+                "Use it only to match voice and structure; do not reuse specific phrasing or hooks "
+                "verbatim, and do not treat facts in it as claims you may repeat unless the brief "
+                "itself supports them:\n" + examples_text
+            )
         if is_rewrite:
             user_parts.append(f"Previous draft:\n{previous_body}")
             issues_text = "\n".join(
@@ -81,13 +98,17 @@ class ScriptAgent(BaseAgent):
             )
             user_parts.append(f"Critic issues to address:\n{issues_text}")
 
+        inputs_used = ["brief", "voice"]
+        if reference_scripts and not is_rewrite:
+            inputs_used.append("reference_scripts")
+
         response, failure = await self._complete_safely(
             model_router,
             tier=ModelTier.STANDARD,
             system=REWRITE_SYSTEM_PROMPT if is_rewrite else SCRIPT_SYSTEM_PROMPT,
             user="\n\n".join(user_parts),
             label="Script rewrite" if is_rewrite else "Script",
-            inputs_used=["brief", "voice"],
+            inputs_used=inputs_used,
             evidence_ids=[],
         )
         if failure:

@@ -56,8 +56,12 @@ class SocialAccount(Base, TimestampMixin, CreatorScopedMixin):
     platform: Mapped[str] = mapped_column(String)  # youtube | instagram | x | reddit | manual
     external_account_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # The URL the creator gave us (CLAUDE.md §69-style manual link entry,
+    # but code-fetched rather than hand-typed — see app/domain/ingestion).
+    url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="connected")  # connected | disconnected | error
     connected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CreatorProfile(Base, TimestampMixin, CreatorScopedMixin):

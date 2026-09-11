@@ -1,12 +1,12 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Library } from "lucide-react";
+import { Library, Youtube } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getSession } from "@/lib/session";
-import { ingestContent, ApiError } from "@/lib/api";
+import { ingestContent, importYoutubeChannel, ApiError } from "@/lib/api";
 import type { RecentContentSummary } from "@/lib/types";
 
 export function ContentLibraryCard({
@@ -21,6 +21,34 @@ export function ContentLibraryCard({
   const [transcript, setTranscript] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
+
+  async function handleImport(e: FormEvent) {
+    e.preventDefault();
+    const session = getSession();
+    if (!session) return;
+    setImporting(true);
+    setImportError(null);
+    setImportSummary(null);
+    try {
+      const result = await importYoutubeChannel(session.creatorId, youtubeUrl);
+      setImportSummary(
+        `Imported ${result.imported_count} video(s) from ${result.channel_name}` +
+          (result.transcript_count > 0 ? ` (${result.transcript_count} with transcripts).` : ".") +
+          " Click “Re-analyze” above to rebuild your Creator DNA using them."
+      );
+      setYoutubeUrl("");
+      await onIngested();
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : "Couldn't import that channel. Check the link and try again.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -56,6 +84,23 @@ export function ContentLibraryCard({
         </CardDescription>
       </CardHeader>
       <CardContent>
+        <form onSubmit={handleImport} className="mb-3 flex flex-col gap-2 rounded-lg border border-dashed border-border p-3 sm:flex-row">
+          <div className="flex flex-1 items-center gap-2">
+            <Youtube className="h-4 w-4 shrink-0 text-subtle" />
+            <input
+              value={youtubeUrl}
+              onChange={(e) => setYoutubeUrl(e.target.value)}
+              placeholder="https://youtube.com/@yourhandle — import recent videos automatically"
+              className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none focus:border-accent"
+            />
+          </div>
+          <Button type="submit" variant="secondary" disabled={importing || !youtubeUrl}>
+            {importing ? "Importing…" : "Import"}
+          </Button>
+        </form>
+        {importError && <p className="mb-3 text-xs text-bad">{importError}</p>}
+        {importSummary && <p className="mb-3 text-xs text-good">{importSummary}</p>}
+
         <form onSubmit={handleSubmit} className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_140px_auto]">
           <input
             required

@@ -20,6 +20,7 @@ from app.domain.content.models import (
 )
 from app.domain.creator.models import AudienceSegment
 from app.domain.creator.service import get_weekly_capacity
+from app.domain.memory.service import store_embedding
 from app.domain.research.models import Opportunity
 from app.domain.strategy.service import AVAILABLE_OPPORTUNITY_STATUSES
 
@@ -215,6 +216,7 @@ async def create_repurposed_content_item(
     )
     db.add(script)
     await db.flush()
+    await store_embedding(db, creator_id=creator_id, content_item_id=item.id, source_type="script", text=body)
     return item, script
 
 
@@ -312,6 +314,7 @@ async def apply_content_brief(
 async def create_script(
     db: AsyncSession,
     *,
+    creator_id: str,
     content_item_id: str,
     brief_id: str,
     platform: Optional[str],
@@ -338,6 +341,7 @@ async def create_script(
         db, content_item_id=content_item_id, from_any=("APPROVED", "BRIEFED"), to="SCRIPTED"
     )
     await db.flush()
+    await store_embedding(db, creator_id=creator_id, content_item_id=content_item_id, source_type="script", text=body)
     return script
 
 

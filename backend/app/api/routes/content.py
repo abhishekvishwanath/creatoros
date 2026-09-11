@@ -20,6 +20,7 @@ from app.agent_service.agents.script_agent import ScriptAgent
 from app.agent_service.context.builder import (
     build_content_brief_context,
     build_creator_state_snapshot,
+    build_relevant_scripts_context,
     build_repurposing_context,
 )
 from app.agent_service.model_router.router import get_model_router
@@ -207,6 +208,8 @@ async def generate_script(
 
     snapshot = await build_creator_state_snapshot(db, creator)
     brief_dict = ContentBriefRead.model_validate(brief).model_dump()
+    query_text = " ".join(filter(None, [brief_dict.get("angle"), brief_dict.get("hook"), brief_dict.get("objective")]))
+    reference_scripts = await build_relevant_scripts_context(db, creator, query_text)
 
     orchestrator = Orchestrator(db=db, model_router=get_model_router())
     output = await orchestrator.run_agent(
@@ -216,6 +219,7 @@ async def generate_script(
         context=snapshot,
         brief=brief_dict,
         platform=item.platform,
+        reference_scripts=reference_scripts,
     )
 
     if output.status == "failed":
@@ -229,6 +233,7 @@ async def generate_script(
         if change.get("type") == "script_create":
             script = await create_script(
                 db,
+                creator_id=creator.id,
                 content_item_id=content_item_id,
                 brief_id=brief.id,
                 platform=item.platform,
@@ -309,6 +314,7 @@ async def review_script(
                     if rewrite_change.get("type") == "script_rewrite":
                         rewrite = await create_script(
                             db,
+                            creator_id=creator.id,
                             content_item_id=content_item_id,
                             brief_id=script.brief_id,
                             platform=item.platform,

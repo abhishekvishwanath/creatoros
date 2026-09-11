@@ -31,6 +31,7 @@ from app.domain.creator.models import (
 from app.domain.commercial.models import Brand, BrandContact, BrandOpportunity, BrandSignal, CampaignBrief, OutreachMessage
 from app.domain.commercial.service import get_current_commercial_profile
 from app.domain.experiments.service import list_learnings
+from app.domain.memory.service import semantic_search
 from app.domain.performance.service import compute_creator_baselines, compute_ratios, get_latest_snapshot
 from app.domain.research.models import Opportunity, ResearchSignal, ResearchSource
 from app.domain.research.service import compute_topic_momentum
@@ -177,6 +178,30 @@ async def build_voice_analysis_transcripts(db: AsyncSession, creator: Creator) -
         for c in result.scalars().all()
         if c.transcript
     ]
+
+
+RELEVANT_SCRIPTS_MAX_ITEMS = 4
+
+
+async def build_relevant_scripts_context(db: AsyncSession, creator: Creator, query_text: str) -> list[dict]:
+    """Task-specific context slice for the Script Agent (CLAUDE.md §6.2,
+    §10's own example: "3-5 relevant successful scripts"). Unlike every
+    other build_*_context function above, this is semantic-similarity
+    retrieval rather than recency — the whole point of content_embeddings
+    existing at all. Falls back to nothing (not an error) when the query
+    can't be embedded or there's no embedded content yet; the Script Agent
+    already treats reference_scripts as optional.
+    """
+    if not query_text.strip():
+        return []
+    matches = await semantic_search(
+        db,
+        creator_id=creator.id,
+        query_text=query_text,
+        source_types=["script", "transcript"],
+        limit=RELEVANT_SCRIPTS_MAX_ITEMS,
+    )
+    return [{"id": m.id, "source_type": m.source_type, "text": m.text} for m in matches]
 
 
 RESEARCH_SIGNALS_CONTEXT_MAX_ITEMS = 20

@@ -56,6 +56,13 @@ class ContentItem(Base, TimestampMixin, CreatorScopedMixin):
     transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     topic: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # Set only when source_type == "ingested" from a platform connector (see
+    # app/domain/ingestion). Lets a re-import stay idempotent — upsert by
+    # (creator_id, external_id) instead of re-inserting the same video every
+    # time the creator re-syncs their channel.
+    external_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    external_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
     # Set only when source_type == "repurposed" (CLAUDE.md §25 content tree:
     # "1 YouTube video -> 3 Reels -> 1 Carousel -> ..."). SET NULL rather than
     # CASCADE on the source's deletion: a derivative that's already been
@@ -104,9 +111,11 @@ class ContentEmbedding(Base, TimestampMixin, CreatorScopedMixin):
     content_item_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("content_items.id", ondelete="CASCADE"), nullable=True
     )
-    source_type: Mapped[str] = mapped_column(String)  # script | statement | comment | research | learning
+    source_type: Mapped[str] = mapped_column(String)  # script | transcript | comment | research | learning
     text: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list] = mapped_column(Vector(1536))
+    # 384-dim to match app/agent_service/memory/embeddings.py's local model
+    # (BAAI/bge-small-en-v1.5) — see CLAUDE.md §6.2.
+    embedding: Mapped[list] = mapped_column(Vector(384))
 
 
 class ContentBrief(Base, TimestampMixin):

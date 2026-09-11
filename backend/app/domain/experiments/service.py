@@ -41,6 +41,7 @@ from app.core.ids import generate_id
 from app.domain.commercial.models import Brand, BrandOpportunity, OutreachThread
 from app.domain.content.models import ContentItem
 from app.domain.experiments.models import Experiment, ExperimentResult, StrategicLearning
+from app.domain.memory.service import store_embedding
 from app.domain.performance.models import PerformanceSnapshot
 
 # Same rigor as MIN_LEARNING_EVIDENCE below, applied per group: a metric
@@ -240,6 +241,7 @@ async def _promote_experiment_to_learning(
     learning.last_validated_at = datetime.now(timezone.utc)
     learning.status = "active"
     await db.flush()
+    await store_embedding(db, creator_id=experiment.creator_id, source_type="learning", text=learning.statement)
     return learning
 
 MIN_LEARNING_EVIDENCE = 2
@@ -392,6 +394,8 @@ async def _upsert_learning_clusters(
         touched.append(learning)
 
     await db.flush()
+    for learning in touched:
+        await store_embedding(db, creator_id=creator_id, source_type="learning", text=learning.statement)
     return touched
 
 

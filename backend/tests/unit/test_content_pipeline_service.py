@@ -201,13 +201,13 @@ async def test_create_script_versions_and_advances_status():
 
     async with AsyncSessionLocal() as session:
         await create_script(
-            session, content_item_id="cnt_pipe3", brief_id="brief_pipe3", platform="instagram",
+            session, creator_id=creator_id, content_item_id="cnt_pipe3", brief_id="brief_pipe3", platform="instagram",
             body="draft 1", hook_variants=["h1"],
         )
         await session.commit()
     async with AsyncSessionLocal() as session:
         await create_script(
-            session, content_item_id="cnt_pipe3", brief_id="brief_pipe3", platform="instagram",
+            session, creator_id=creator_id, content_item_id="cnt_pipe3", brief_id="brief_pipe3", platform="instagram",
             body="draft 2", hook_variants=["h2"], status="rewritten",
         )
         await session.commit()
@@ -230,7 +230,7 @@ async def test_apply_critique_sets_final_when_passed_and_critiqued_when_not():
 
     async with AsyncSessionLocal() as session:
         script = await create_script(
-            session, content_item_id="cnt_pipe4", brief_id="brief_pipe4", platform=None, body="d", hook_variants=[]
+            session, creator_id=creator_id, content_item_id="cnt_pipe4", brief_id="brief_pipe4", platform=None, body="d", hook_variants=[]
         )
         await session.commit()
         script_id = script.id

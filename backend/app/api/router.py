@@ -9,7 +9,9 @@ from app.api.routes import (
     creators,
     experiments,
     health,
+    ingestion,
     learnings,
+    memory,
     opportunities,
     outreach,
     performance,
@@ -37,3 +39,6 @@ api_router.include_router(commercial.router)
 api_router.include_router(brands.router)
 api_router.include_router(brands.radar_router)
 api_router.include_router(outreach.router)
+api_router.include_router(ingestion.router)
+api_router.include_router(ingestion.accounts_router)
+api_router.include_router(memory.router)

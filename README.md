@@ -166,29 +166,45 @@ historical sequencing, not a list of what's still outstanding.
 - Frontend: `Brands` and `Outreach` pages, Analytics page filters learnings by
   content vs. commercial.
 
+### Platform ingestion + semantic memory — built
+
+- **YouTube link ingestion** (`app/domain/ingestion`): a creator pastes their channel URL
+  (onboarding, or any time from the Creator DNA page) and the backend resolves it to a
+  channel via YouTube's public channel page, pulls recent uploads from its public RSS feed,
+  and best-effort fetches each video's public caption track for transcript text — all
+  unauthenticated, no API key or OAuth app required (CLAUDE.md §17.1's "compliant fallback
+  mechanism" in practice). Each video becomes a `ContentItem`; re-importing the same channel
+  upserts by video id instead of duplicating. Instagram/X/Reddit connectors remain a real
+  gap (#1 below) — YouTube was the one platform with a reliable unauthenticated path.
+- **Semantic memory** (`app/agent_service/memory`, `app/domain/memory`): `content_embeddings`
+  is now live — a local ONNX embedding model (`BAAI/bge-small-en-v1.5` via `fastembed`, no
+  API key, no network call at embed time) runs on every script, ingested transcript,
+  audience signal, research signal, and strategic learning as it's written. The Script
+  Agent's context now includes the creator's own semantically-closest past
+  scripts/transcripts (CLAUDE.md §10's own example) instead of only recency-bounded lists,
+  and `GET /creators/{id}/memory/search` (surfaced in the UI as "Search your memory" on the
+  Creator DNA page) lets a creator query across everything embedded so far by meaning, not
+  keyword.
+
 ## What's still missing for a real end-to-end prototype
 
 Everything below is a genuine gap, not a nitpick:
 
-1. Any platform/API ingestion — content, research signals, audience signals, and
-   performance are 100% manual entry today; no YouTube/Instagram/X/Reddit connector exists
-   (this is a documented, deliberate MVP choice per CLAUDE.md §69, not an oversight, but a
-   prototype a real creator uses daily will hit this wall fast).
-2. Semantic memory: the `content_embeddings` pgvector table exists in the schema but
-   nothing writes or queries it — no embedding generation, no similarity search. Context
-   retrieval today is entirely "most recent N rows," not semantic.
-3. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
+1. Instagram/X/Reddit ingestion, and research-signal/audience-signal/performance ingestion
+   generally, are still 100% manual entry — only YouTube has a connector (see above). A
+   prototype a real creator uses daily will still hit this wall for every platform but one.
+2. Object storage (R2/S3) is not wired — no video/image/media upload or storage path
    exists.
-4. Research Agent (CLAUDE.md §11.3) doesn't exist as a live cross-platform fetcher — Trend
+3. Research Agent (CLAUDE.md §11.3) doesn't exist as a live cross-platform fetcher — Trend
    Intelligence now reasons over signals once they're in the system (momentum/saturation/
    durability/relevance), but nothing goes and finds those signals itself; that's still
    gated on #1 above.
-5. No CI-enforced deployment (`.github/workflows` runs tests + build on every push, but
+4. No CI-enforced deployment (`.github/workflows` runs tests + build on every push, but
    there's no Vercel/Railway deploy config yet).
-6. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
+5. The 5-creator validation protocol (CLAUDE.md §48–49) is a process, not code — no
    baseline-capture tooling or weekly-check tooling exists yet, by design at this stage.
 
 Shipped since the last pass over this list (all with passing unit/integration tests and a
 live smoke test against a real Supabase project, not just mocked): Home dashboard rewire,
-Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, and real Supabase
-Auth.
+Repurposing Agent, Experimentation engine, Trend Intelligence Agent, CI, real Supabase Auth,
+YouTube link ingestion, and semantic memory (local embeddings + search).

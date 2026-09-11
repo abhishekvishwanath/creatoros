@@ -736,3 +736,27 @@ export interface AnalyzeTrendsResponse {
   insights: TrendInsightRead[];
   warnings: string[];
 }
+
+export interface YoutubeImportResponse {
+  channel_name: string;
+  social_account_id: string;
+  imported_count: number;
+  transcript_count: number;
+  warnings: string[];
+}
+
+export interface SocialAccountRead {
+  id: string;
+  platform: string;
+  display_name: string | null;
+  url: string | null;
+  status: string;
+  last_synced_at: string | null;
+}
+
+export interface MemorySearchResult {
+  id: string;
+  source_type: string;
+  content_item_id: string | null;
+  text: string;
+}

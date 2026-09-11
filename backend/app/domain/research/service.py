@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.ids import generate_id
 from app.domain.content.models import ContentPillar
 from app.domain.creator.models import CreatorPreference
+from app.domain.memory.service import store_embedding
 from app.domain.research.models import (
     Opportunity,
     OpportunityEvidence,
@@ -64,6 +65,7 @@ async def ingest_research_signal(db: AsyncSession, *, creator_id: str, data: dic
     )
     db.add(signal)
     await db.flush()
+    await store_embedding(db, creator_id=creator_id, source_type="research", text=data["summary"])
     return signal
 
 
